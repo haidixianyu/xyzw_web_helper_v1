@@ -67,7 +67,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMessage } from "naive-ui";
-import { useTokenStore } from "@/stores/tokenStore";
+import { useTokenStore, selectedTokenId } from "@/stores/tokenStore";
 import { CloudDone } from "@vicons/ionicons5";
 
 const router = useRouter();
@@ -265,6 +265,25 @@ onMounted(() => {
     }
   }
 });
+
+// 监听账号切换：当 selectedTokenId 变化时（如点击上一个/下一个账号），
+// 等待连接就绪后重新初始化游戏数据，确保俱乐部、活动等 tab 数据更新
+watch(
+  selectedTokenId,
+  async (newId, oldId) => {
+    if (!newId || newId === oldId) return;
+    // 等待新账号 WebSocket 连接建立
+    let tries = 0;
+    while (tries < 20) {
+      const status = tokenStore.getWebSocketStatus(newId);
+      if (status === "connected") break;
+      if (status === "error") return;
+      await new Promise((r) => setTimeout(r, 300));
+      tries++;
+    }
+    await initializeGameData();
+  },
+);
 
 // 监听当前选中 Token 的连接错误（如 token 过期）并给出明确提示
 watch(

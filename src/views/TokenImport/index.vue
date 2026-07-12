@@ -183,6 +183,12 @@
                   v-if="token.server"
                   >{{ token.server }}</a-tag
                 >
+                <!-- 战斗力（缓存在 token 数据中，连接后自动更新） -->
+                <a-tag
+                  v-if="token.power"
+                  color="blue"
+                  >战力 {{ formatPower(token.power) }}</a-tag
+                >
                 <!-- 连接状态指示器 -->
                 <a-badge
                   :status="getTokenStyle(token.id)"
@@ -399,6 +405,13 @@
                       :type="getServerTagType(token.id)"
                       v-if="token.server"
                       >{{ token.server }}</n-tag
+                    >
+                    <!-- 战斗力（缓存在 token 数据中，连接后自动更新） -->
+                    <n-tag
+                      size="small"
+                      type="info"
+                      v-if="token.power"
+                      >战力 {{ formatPower(token.power) }}</n-tag
                     >
                     <!-- 备注信息 - 显示在服务器信息后面 -->
                     <div
@@ -1493,6 +1506,16 @@ const maskToken = (token) => {
   const len = token.length;
   if (len <= 8) return token;
   return token.substring(0, 4) + "***" + token.substring(len - 4);
+};
+
+// 格式化战斗力
+const formatPower = (power) => {
+  if (!power) return "0";
+  const yi = 100000000;
+  const wan = 10000;
+  if (power >= yi) return (power / yi).toFixed(2) + "亿";
+  if (power >= wan) return (power / wan).toFixed(2) + "万";
+  return power.toString();
 };
 
 const formatTime = (timestamp) => {

@@ -6,6 +6,12 @@
 import { $CacheManager } from "@/stores/cache";
 import { bonProtocol, g_utils } from "./bonProtocol.js";
 import { wsLogger, gameLogger } from "./logger.js";
+import {
+  workerSetTimeout,
+  workerSetInterval,
+  workerClearTimeout,
+  workerClearInterval,
+} from "./workerTimer.js";
 
 /**
  * 错误码映射表
@@ -144,7 +150,7 @@ export function registerDefaultCommands(reg) {
     .registerHeartbeat()
     // 角色/系统
     .register("role_getroleinfo", {
-      clientVersion: "2.21.2-fa918e1997301834-wx",
+      clientVersion: "2.34.1-fa918e1997301834-wx",
       inviteUid: 0,
       platform: "hortor",
       platformExt: "mix",
@@ -759,13 +765,13 @@ export class XyzwWebSocketClient {
     // 先断开现有连接
     this.disconnect();
 
-    // 延迟重连，避免过于频繁
-    setTimeout(() => {
+    // 延迟重连，避免过于频繁（使用 Worker 定时器，避免后台节流）
+    workerSetTimeout(() => {
       try {
         this.init();
       } finally {
         // 无论成功或失败都重置重连状态
-        setTimeout(() => {
+        workerSetTimeout(() => {
           this.isReconnecting = false;
         }, 2000); // 2秒后允许下次重连
       }
@@ -814,7 +820,7 @@ export class XyzwWebSocketClient {
         this.dialogStatus = true;
         wsLogger.info("自动触发重连...");
         this.reconnect();
-        setTimeout(() => {
+        workerSetTimeout(() => {
           this.dialogStatus = false;
         }, 2000);
       }
@@ -854,10 +860,11 @@ export class XyzwWebSocketClient {
       const requestSeq = ++this.seq;
 
       // 设置 Promise 状态，使用seq作为键
-      this.promises[requestSeq] = { resolve, reject, originalCmd: cmd };
+      // 使用 Worker 定时器，避免后台标签页节流导致超时不准确
+      this.promises[requestSeq] = { resolve, reject, originalCmd: cmd, timer: null };
 
       // 超时处理
-      const timer = setTimeout(() => {
+      this.promises[requestSeq].timer = workerSetTimeout(() => {
         delete this.promises[requestSeq];
         reject(new Error(`请求超时: ${cmd} (${timeoutMs}ms)`));
       }, timeoutMs);
@@ -904,15 +911,15 @@ export class XyzwWebSocketClient {
   /** 设置心跳 */
   _setupHeartbeat() {
     // 延迟3秒后开始发送第一个心跳，避免连接刚建立就发送
-    setTimeout(() => {
+    workerSetTimeout(() => {
       if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
         wsLogger.debug("开始发送首次心跳");
         this.sendHeartbeat();
       }
     }, 3000);
 
-    // 设置定期心跳
-    this.heartbeatTimer = setInterval(() => {
+    // 设置定期心跳（使用 Worker 定时器，避免后台标签页节流）
+    this.heartbeatTimer = workerSetInterval(() => {
       if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
         this.sendHeartbeat();
       } else {
@@ -923,9 +930,10 @@ export class XyzwWebSocketClient {
 
   /** 队列处理循环 */
   _processQueueLoop() {
-    if (this.sendQueueTimer) clearInterval(this.sendQueueTimer);
+    if (this.sendQueueTimer) workerClearInterval(this.sendQueueTimer);
 
-    this.sendQueueTimer = setInterval(async () => {
+    // 使用 Worker 定时器，避免后台标签页节流导致消息发送延迟
+    this.sendQueueTimer = workerSetInterval(async () => {
       if (!this.sendQueue.length) return;
       if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) return;
 
@@ -1007,6 +1015,10 @@ export class XyzwWebSocketClient {
     if (packet.resp !== undefined && this.promises[packet.resp]) {
       const promiseData = this.promises[packet.resp];
       delete this.promises[packet.resp];
+      // 清除超时定时器
+      if (promiseData.timer) {
+        workerClearTimeout(promiseData.timer);
+      }
 
       // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
       const responseBody =
@@ -1177,6 +1189,10 @@ export class XyzwWebSocketClient {
       // 检查 Promise 是否匹配当前响应的任一原始命令
       if (originalCmds.includes(promiseData.originalCmd)) {
         delete this.promises[requestId];
+        // 清除超时定时器
+        if (promiseData.timer) {
+          workerClearTimeout(promiseData.timer);
+        }
 
         // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
         const responseBody =
@@ -1210,11 +1226,11 @@ export class XyzwWebSocketClient {
   /** 清理定时器 */
   _clearTimers() {
     if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
+      workerClearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
     if (this.sendQueueTimer) {
-      clearInterval(this.sendQueueTimer);
+      workerClearInterval(this.sendQueueTimer);
       this.sendQueueTimer = null;
     }
   }

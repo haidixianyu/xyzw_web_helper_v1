@@ -2,6 +2,7 @@
  * 功法类任务
  * 包含: batchLegacyClaim, batchLegacyGiftSendEnhanced
  */
+import { workerSleep } from "../workerTimer.js";
 
 /**
  * 创建功法类任务执行器
@@ -301,7 +302,7 @@ export function createTasksLegacy(deps) {
               message: `=== ${token.name} 赠送功法残卷失败: ${errorMsg}，将在3秒后重试 ===`,
               type: "warning",
             });
-            await new Promise((r) => setTimeout(r, delayConfig.long));
+            await workerSleep(delayConfig.long);
           } else {
             addLog({
               time: new Date().toLocaleTimeString(),

@@ -32,6 +32,10 @@ declare interface TokenData {
   upgradedToPermanent?: boolean; // 是否升级为长期有效
   upgradedAt?: string; // 升级时间
   updatedAt?: string; // 更新时间
+  power?: number; // 战斗力（从 role_getroleinfo 响应中提取并缓存）
+  level?: number; // 角色等级
+  roleName?: string; // 游戏内角色名（可能与 token name 不同）
+  powerUpdatedAt?: string; // 战力最后更新时间
 }
 
 declare interface WebSocketConnection {
@@ -231,11 +235,16 @@ export const useTokenStore = defineStore("tokens", () => {
   const updateToken = (tokenId: string, updates: Partial<TokenData>) => {
     const index = gameTokens.value.findIndex((token) => token.id === tokenId);
     if (index !== -1) {
-      gameTokens.value[index] = {
-        ...gameTokens.value[index],
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      };
+      // 重新赋值整个数组，确保 ref setter 被触发
+      gameTokens.value = gameTokens.value.map((t, i) =>
+        i === index ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t,
+      );
+      // 直接写入 localStorage 作为备份，确保持久化
+      try {
+        localStorage.setItem("gameTokens", JSON.stringify(gameTokens.value));
+      } catch (e) {
+        console.error("[updateToken] Failed to persist gameTokens:", e);
+      }
       return true;
     }
     return false;
@@ -463,12 +472,31 @@ export const useTokenStore = defineStore("tokens", () => {
       if (cmd === "role_getroleinforesp") {
         syncRandomSeedFromStatistics(tokenId, body, client);
 
-        // 更新头像
-        if (body?.role?.headImg) {
+        // 更新头像、战力、等级、角色名（缓存到 token 数据中，供顶部账号切换器与列表页展示）
+        const role = body?.role;
+        if (role) {
           const token = gameTokens.value.find((t) => t.id === tokenId);
-          if (token && token.avatar !== body.role.headImg) {
-            updateToken(tokenId, { avatar: body.role.headImg });
-            wsLogger.debug(`更新头像 [${tokenId}]: ${body.role.headImg}`);
+          if (token) {
+            const updates: Partial<TokenData> = {};
+            if (role.headImg && token.avatar !== role.headImg) {
+              updates.avatar = role.headImg;
+              wsLogger.debug(`更新头像 [${tokenId}]: ${role.headImg}`);
+            }
+            const newPower =
+              role.power ?? role.fighting ?? null;
+            if (newPower != null && token.power !== newPower) {
+              updates.power = newPower;
+              updates.powerUpdatedAt = new Date().toISOString();
+            }
+            if (role.level != null && token.level !== role.level) {
+              updates.level = role.level;
+            }
+            if (role.name && token.roleName !== role.name) {
+              updates.roleName = role.name;
+            }
+            if (Object.keys(updates).length > 0) {
+              updateToken(tokenId, updates);
+            }
           }
         }
       }
@@ -824,6 +852,17 @@ export const useTokenStore = defineStore("tokens", () => {
         const cmd = message?.cmd || "unknown";
         wsLogger.wsMessage(tokenId, cmd, true);
 
+        // === 抓包调试日志：记录所有收到的WebSocket命令 ===
+        const token = wsConnections.value[tokenId];
+        const tokenName = token?.actualToken
+          ? token.actualToken.substring(0, 8) + "..."
+          : tokenId;
+        console.log(
+          `%c[WS收] ${tokenName} ← ${cmd}`,
+          "color: #1890ff; font-weight: bold;",
+          message,
+        );
+
         if (wsConnections.value[tokenId]) {
           wsConnections.value[tokenId].lastMessage = {
             timestamp: new Date().toISOString(),
@@ -948,6 +987,13 @@ export const useTokenStore = defineStore("tokens", () => {
       client.send(cmd, params, options);
       wsLogger.wsMessage(tokenId, cmd, false);
 
+      // === 抓包调试日志：记录所有发出的WebSocket命令 ===
+      console.log(
+        `%c[WS发] ${tokenId.substring(0, 8)}... → ${cmd}`,
+        "color: #52c41a; font-weight: bold;",
+        params,
+      );
+
       return true;
     } catch (error) {
       wsLogger.error(`发送失败 [${tokenId}] ${cmd}:`, error.message);
@@ -990,7 +1036,21 @@ export const useTokenStore = defineStore("tokens", () => {
     }
 
     try {
+      // === 抓包调试日志：记录所有发出的WebSocket命令（Promise版） ===
+      console.log(
+        `%c[WS发] ${tokenId.substring(0, 8)}... → ${cmd}`,
+        "color: #52c41a; font-weight: bold;",
+        params,
+      );
+
       const result = await client.sendWithPromise(cmd, params, timeout);
+
+      // === 抓包调试日志：记录响应 ===
+      console.log(
+        `%c[WS收] ${tokenId.substring(0, 8)}... ← ${cmd} (响应)`,
+        "color: #1890ff; font-weight: bold;",
+        result,
+      );
 
       // 特殊日志：fight_starttower 响应
       if (cmd === "fight_starttower") {

@@ -1,3 +1,5 @@
+import { workerSleep } from "../workerTimer.js";
+
 /**
  * 罐子类任务
  * 包含: resetBottles, batchlingguanzi
@@ -67,7 +69,7 @@ export function createTasksBottle(deps) {
           5000,
         );
 
-        await new Promise((r) => setTimeout(r, 500));
+        await workerSleep(500);
 
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -143,7 +145,7 @@ export function createTasksBottle(deps) {
           {},
           5000,
         );
-        await new Promise((r) => setTimeout(r, 500));
+        await workerSleep(500);
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),

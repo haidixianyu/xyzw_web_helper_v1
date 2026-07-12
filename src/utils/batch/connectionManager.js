@@ -1,3 +1,5 @@
+import { workerSleep } from "../workerTimer.js";
+
 /**
  * WebSocket连接管理器
  */
@@ -19,7 +21,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
    */
   const waitForConnectionSlot = async () => {
     while (connectionQueue.active >= batchSettings.maxActive) {
-      await new Promise((r) => setTimeout(r, 1000));
+      await workerSleep(1000);
     }
     connectionQueue.active++;
   };
@@ -43,7 +45,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
     while (Date.now() - start < timeout) {
       const status = tokenStore.getWebSocketStatus(tokenId);
       if (status === "connected") return true;
-      await new Promise((r) => setTimeout(r, 500));
+      await workerSleep(500);
     }
     return false;
   };
@@ -88,7 +90,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
         });
 
         tokenStore.closeWebSocketConnection(tokenId);
-        await new Promise((r) => setTimeout(r, batchSettings.reconnectDelay));
+        await workerSleep(batchSettings.reconnectDelay);
 
         addLog({
           time: new Date().toLocaleTimeString(),

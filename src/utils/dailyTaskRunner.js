@@ -1,4 +1,5 @@
 import { useTokenStore } from "@/stores/tokenStore";
+import { workerSleep } from "./workerTimer.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -77,7 +78,7 @@ export class DailyTaskRunner {
         params,
         timeout,
       );
-      await new Promise((resolve) => setTimeout(resolve, this.delaySettings.commandDelay));
+      await workerSleep(this.delaySettings.commandDelay);
       if (description) this.log(`${description} - 成功`, "success");
       return result;
     } catch (error) {
@@ -418,7 +419,7 @@ export class DailyTaskRunner {
                 "warning",
               );
             }
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await workerSleep(1000);
           }
         },
       });
@@ -724,7 +725,7 @@ export class DailyTaskRunner {
         await task.execute();
         const progress = Math.floor(((i + 1) / totalTasks) * 100);
         if (this.callbacks?.onProgress) this.callbacks.onProgress(progress);
-        await new Promise((resolve) => setTimeout(resolve, this.delaySettings.taskDelay));
+        await workerSleep(this.delaySettings.taskDelay);
       } catch (error) {
         this.log(`任务执行失败: ${task.name} - ${error.message}`, "error");
       }

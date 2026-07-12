@@ -1,5 +1,6 @@
 import { HERO_DICT } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
+import { workerSleep } from "../workerTimer.js";
 
 /**
  * 开箱、钓鱼、招募类任务
@@ -102,7 +103,7 @@ export function createTasksItem(deps) {
               // 失败则停止当前英雄的升星尝试
               break;
             }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+            await workerSleep(delayConfig.action);
           }
         }
 
@@ -193,7 +194,7 @@ export function createTasksItem(deps) {
               // 失败则停止当前英雄的图鉴升星尝试
               break;
             }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+            await workerSleep(delayConfig.action);
           }
         }
 
@@ -277,7 +278,7 @@ export function createTasksItem(deps) {
             // 失败则停止尝试
             break;
           }
-          await new Promise((r) => setTimeout(r, delayConfig.action));
+          await workerSleep(delayConfig.action);
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -461,7 +462,7 @@ export function createTasksItem(deps) {
             } catch (err) {
               // ignore
             }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+            await workerSleep(delayConfig.action);
           }
 
           // Check and claim point rewards (Moved out of loop to ensure execution)
@@ -495,7 +496,7 @@ export function createTasksItem(deps) {
                       message: `${token.name} 领取俱乐部任务奖励 (当前积分: ${legionPoint})`,
                       type: "success",
                     });
-                    await new Promise((r) => setTimeout(r, 1000));
+                    await workerSleep(1000);
                   } catch (e) {
                     addLog({
                       time: new Date().toLocaleTimeString(),
@@ -519,7 +520,7 @@ export function createTasksItem(deps) {
                       message: `${token.name} 领取个人任务奖励 (当前积分: ${selfPoint})`,
                       type: "success",
                     });
-                    await new Promise((r) => setTimeout(r, 1000));
+                    await workerSleep(1000);
                   } catch (e) {
                     addLog({
                       time: new Date().toLocaleTimeString(),
@@ -724,7 +725,7 @@ export function createTasksItem(deps) {
           }
 
           if (remainingTickets > 0) {
-             await new Promise((r) => setTimeout(r, delayConfig.action));
+             await workerSleep(delayConfig.action);
           }
         }
 
@@ -810,7 +811,7 @@ export function createTasksItem(deps) {
             message: `${token.name} 开箱进度: ${(i + 1) * 10}/${totalCount}`,
             type: "info",
           });
-          await new Promise((r) => setTimeout(r, delayConfig.action));
+          await workerSleep(delayConfig.action);
         }
 
         if (remainder > 0 && !shouldStop.value) {
@@ -830,7 +831,7 @@ export function createTasksItem(deps) {
           tokenId,
           "item_batchclaimboxpointreward",
         );
-        await new Promise((r) => setTimeout(r, delayConfig.action));
+        await workerSleep(delayConfig.action);
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
         tokenStatus.value[tokenId] = "completed";
         addLog({
@@ -989,7 +990,7 @@ export function createTasksItem(deps) {
              }
           }
 
-          await new Promise((r) => setTimeout(r, delayConfig.action));
+          await workerSleep(delayConfig.action);
         }
 
         if (remainder > 0 && !shouldStop.value) {
@@ -1034,7 +1035,7 @@ export function createTasksItem(deps) {
                          3000
                        );
                        // 稍微延迟，避免请求过快
-                       await new Promise((r) => setTimeout(r, 500)); 
+                       await workerSleep(500);
                     } catch (err) {
                        addLog({
                           time: new Date().toLocaleTimeString(),
@@ -1143,7 +1144,7 @@ export function createTasksItem(deps) {
             message: `招募进度: ${(i + 1) * 10}/${totalCount}`,
             type: "info",
           });
-          await new Promise((r) => setTimeout(r, delayConfig.action));
+          await workerSleep(delayConfig.action);
         }
 
         if (remainder > 0 && !shouldStop.value) {
@@ -1406,7 +1407,7 @@ export function createTasksItem(deps) {
               message: `${token.name} ${box.name} 开箱进度: ${(i + 1) * 10}/${count}`,
               type: "info",
             });
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+            await workerSleep(delayConfig.action);
           }
 
           if (remainder > 0 && !shouldStop.value) {

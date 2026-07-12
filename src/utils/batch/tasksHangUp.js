@@ -1,3 +1,5 @@
+import { workerSleep } from "../workerTimer.js";
+
 /**
  * 挂机、答题、签到类任务
  * 包含: claimHangUpRewards, batchAddHangUpTime, batchStudy, batchclubsign
@@ -23,6 +25,7 @@ export function createTasksHangUp(deps) {
     addLog,
     message,
     currentRunningTokenId,
+    claimHangUpOnly,
   } = deps;
 
   /**
@@ -66,23 +69,31 @@ export function createTasksHangUp(deps) {
           {},
           5000,
         );
-        await new Promise((r) => setTimeout(r, 500));
+        await workerSleep(500);
 
-        // 2. Add time 4 times
-        for (let i = 0; i < 4; i++) {
-          if (shouldStop.value) break;
+        // 2. Add time 4 times（仅领取模式下跳过加钟）
+        if (!claimHangUpOnly?.value) {
+          for (let i = 0; i < 4; i++) {
+            if (shouldStop.value) break;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 挂机加钟 ${i + 1}/4`,
+              type: "info",
+            });
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "system_mysharecallback",
+              { isSkipShareCard: true, type: 2 },
+              5000,
+            );
+            await workerSleep(500);
+          }
+        } else {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 挂机加钟 ${i + 1}/4`,
+            message: `${token.name} 已开启「仅领取，不加钟」，跳过加钟`,
             type: "info",
           });
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "system_mysharecallback",
-            { isSkipShareCard: true, type: 2 },
-            5000,
-          );
-          await new Promise((r) => setTimeout(r, 500));
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -153,7 +164,7 @@ export function createTasksHangUp(deps) {
             { isSkipShareCard: true, type: 2 },
             5000,
           );
-          await new Promise((r) => setTimeout(r, 500));
+          await workerSleep(500);
         }
         tokenStatus.value[tokenId] = "completed";
         addLog({
@@ -271,7 +282,7 @@ export function createTasksHangUp(deps) {
             break;
           }
 
-          await new Promise((r) => setTimeout(r, 1000));
+          await workerSleep(1000);
           maxWait--;
         }
 
@@ -354,7 +365,7 @@ export function createTasksHangUp(deps) {
           {},
           5000,
         );
-        await new Promise((r) => setTimeout(r, 500));
+        await workerSleep(500);
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),

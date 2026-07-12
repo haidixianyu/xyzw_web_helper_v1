@@ -1,11 +1,9 @@
-import { getTowerActId } from "../towerActId.js";
 import { workerSleep } from "../workerTimer.js";
 
 /**
  * 爬塔类任务
  * 包含: climbTower, climbWeirdTower, batchClaimFreeEnergy
  */
-import { normalizeWeirdTowerMaxClimb } from "../towerClimbLimit.js";
 
 /**
  * 创建爬塔类任务执行器
@@ -29,7 +27,6 @@ export function createTasksTower(deps) {
     currentRunningTokenId,
     currentSettings,
     loadSettings,
-    weirdTowerMaxClimb,
   } = deps;
 
   /**
@@ -364,16 +361,8 @@ export function createTasksTower(deps) {
         });
 
         let count = 0;
-        const MAX_CLIMB = normalizeWeirdTowerMaxClimb(
-          weirdTowerMaxClimb?.value ?? weirdTowerMaxClimb,
-        );
+        const MAX_CLIMB = 100;
         let consecutiveFailures = 0;
-
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 本次最多爬怪异塔 ${MAX_CLIMB} 次`,
-          type: "info",
-        });
 
         while (currentEnergy > 0 && count < MAX_CLIMB && !shouldStop.value) {
           try {
@@ -681,7 +670,7 @@ export function createTasksTower(deps) {
         let res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "towers_getinfo",
-          { actId: getTowerActId() },
+          { actId: computedActId },
           5000
         );
         
@@ -788,12 +777,12 @@ export function createTasksTower(deps) {
 
             while (loop && !shouldStop.value) {
                 if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: getTowerActId(), towerType: type }, 5000);
+                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type, actId: actId }, 5000);
                     // 稍微等待一下
                     await workerSleep(500);
                 }
 
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: getTowerActId(), towerType: type }, 5000);
+                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type, actId: actId }, 5000);
                 const battleData = fightRes?.battleData;
                 const curHP = battleData?.result?.accept?.ext?.curHP;
                 
@@ -809,8 +798,8 @@ export function createTasksTower(deps) {
                      needStart = false;
                      failCount = 0;
 
-                     // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: getTowerActId() }, 5000);
+                     // 刷新数据（带 actId）
+                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: actId }, 5000);
                      towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
 
                      if (isTowerCleared(type)) {

@@ -107,96 +107,25 @@
         </div>
 
         <!-- Token Selection -->
-        <n-card class="token-list-card">
-          <template #header>
-            <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-              <div style="display: flex; align-items: center; gap: 2px;">
-                <span>账号列表</span>
-                <n-tooltip placement="bottom">
-                  <template #trigger>
-                    <n-button
-                      size="small"
-                      quaternary
-                      circle
-                      @click="isAccountListCollapsed = !isAccountListCollapsed"
-                    >
-                      <n-icon :size="20">
-                        <ChevronUp v-if="!isAccountListCollapsed" />
-                        <ChevronDown v-else />
-                      </n-icon>
-                    </n-button>
-                  </template>
-                  {{ isAccountListCollapsed ? `展开全部 (${sortedTokens.length})` : '收起（仅显示已选）' }}
-                </n-tooltip>
-                <n-tag
-                  size="medium"
-                  :type="currentWeekType === '黑市周' ? 'warning' : 'info'"
-                  round
-                  style="margin-left: 6px; font-size: 16px; font-weight: bold;"
-                >
-                  {{ currentWeekType }}
-                </n-tag>
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <n-tooltip placement="bottom">
-                  <template #trigger>
-                    <n-button
-                      size="small"
-                      type="info"
-                      ghost
-                      :loading="carOverviewLoading"
-                      :disabled="carOverviewLoading || isRunning"
-                      @click="fetchCarOverview"
-                    >
-                      <template #icon>
-                        <n-icon>
-                          <Refresh />
-                        </n-icon>
-                      </template>
-                      发车信息
-                    </n-button>
-                  </template>
-                  查询发车状态，标签格式：未发车数/待收车数
-                </n-tooltip>
-                <n-tooltip placement="bottom">
-                  <template #trigger>
-                    <n-button
-                      size="small"
-                      type="success"
-                      ghost
-                      :loading="towerOverviewLoading"
-                      :disabled="towerOverviewLoading || isRunning"
-                      @click="fetchTowerOverview"
-                    >
-                      <template #icon>
-                        <n-icon>
-                          <Refresh />
-                        </n-icon>
-                      </template>
-                      闯关
-                    </n-button>
-                  </template>
-                  查询换皮闯关进度，标签格式：已通关数/8
-                </n-tooltip>
-                <n-button
-                  size="small"
-                  type="primary"
-                  ghost
-                  :loading="isRefreshingPower"
-                  :disabled="isRefreshingPower || isRunning"
-                  @click="refreshTokenPower"
-                >
-                  <template #icon>
-                    <n-icon>
-                      <Refresh />
-                    </n-icon>
-                  </template>
-                  刷新战力
-                </n-button>
-              </div>
-            </div>
+        <n-card title="账号列表" class="token-list-card">
+          <template #header-extra>
+            <n-button
+              size="small"
+              type="primary"
+              ghost
+              :loading="isRefreshingPower"
+              :disabled="isRefreshingPower || isRunning"
+              @click="refreshTokenPower"
+            >
+              <template #icon>
+                <n-icon>
+                  <Refresh />
+                </n-icon>
+              </template>
+              刷新战力
+            </n-button>
           </template>
-          <div v-if="!isAccountListCollapsed" style="margin-bottom: 16px">
+          <div style="margin-bottom: 16px">
             <!-- 分组管理和选择 -->
             <n-space vertical style="width: 100%">
               <!-- 分组选择部分 -->
@@ -256,21 +185,13 @@
                   align-items: center;
                 "
               >
-                <n-space align="center" :size="8">
-                  <n-button
-                    type="info"
-                    size="small"
-                    @click="showGroupManageModal = true"
-                  >
-                    管理分组
-                  </n-button>
-                  <n-button size="small" @click="exportGroups">
-                    导出分组
-                  </n-button>
-                  <n-button size="small" @click="importGroups">
-                    导入分组
-                  </n-button>
-                </n-space>
+                <n-button
+                  type="info"
+                  size="small"
+                  @click="showGroupManageModal = true"
+                >
+                  管理分组
+                </n-button>
                 <span
                   v-if="selectedGroups.length > 0"
                   style="font-size: 12px; color: #86909c"
@@ -283,7 +204,7 @@
           </div>
 
           <!-- 排序按钮组 -->
-          <div v-if="!isAccountListCollapsed" class="sort-buttons" style="margin-bottom: 12px">
+          <div class="sort-buttons" style="margin-bottom: 12px">
             <n-space align="center">
               <n-button-group size="small">
                 <n-button
@@ -314,37 +235,11 @@
                 >
                   最后使用 {{ getSortIcon("lastUsed") }}
                 </n-button>
-                <n-button
-                  @click="toggleSort('power')"
-                  :type="sortConfig.field === 'power' ? 'primary' : 'default'"
-                >
-                  战力 {{ getSortIcon("power") }}
-                </n-button>
-                <n-button
-                  @click="toggleSort('group')"
-                  :type="sortConfig.field === 'group' ? 'primary' : 'default'"
-                >
-                  分组 {{ getSortIcon("group") }}
-                </n-button>
               </n-button-group>
             </n-space>
           </div>
 
-          <!-- 收起时：只显示账号名称和状态，每行最多3个 -->
-          <div
-            v-if="isAccountListCollapsed"
-            style="padding: 8px 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 12px; color: var(--text-secondary, #555); font-size: 14px;"
-          >
-            <span v-if="displayedTokens.length === 0" style="color: #999; grid-column: 1 / -1;">未选择账号</span>
-            <span
-              v-else
-              v-for="t in displayedTokens"
-              :key="t.id"
-              style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-            >{{ t.name }}({{ getStatusText(t.id) }})</span>
-          </div>
-
-          <n-space v-if="!isAccountListCollapsed" vertical>
+          <n-space vertical>
             <n-checkbox
               :checked="isAllSelected"
               :indeterminate="isIndeterminate"
@@ -356,75 +251,69 @@
               <n-grid
                 :x-gap="12"
                 :y-gap="8"
-                :cols="effectiveTokenListColumns"
+                :cols="batchSettings.tokenListColumns"
               >
-                <n-grid-item v-for="token in displayedTokens" :key="token.id">
-                  <div class="token-row">
-                    <n-checkbox
-                      :value="token.id"
-                      :label="token.name"
-                      class="token-checkbox"
-                    />
-                    <div v-if="!isAccountListCollapsed" class="token-tags">
-                      <n-tag
-                        v-if="token.power != null"
-                        size="small"
-                        type="info"
-                        :title="`战力原始值: ${token.power}`"
-                      >
-                        {{ formatPower(token.power) }}
-                      </n-tag>
-                      <n-tag
-                        size="small"
-                        :type="getStatusType(token.id)"
-                      >
-                        {{ getStatusText(token.id) }}
-                      </n-tag>
-                      <!-- 发车信息：未发车数/待收车数 -->
-                      <n-tag
-                        v-if="carOverview[token.id]"
-                        size="small"
-                        :type="carOverview[token.id].claimable > 0 ? 'warning' : 'default'"
-                        :bordered="carOverview[token.id].claimable > 0"
-                        :title="`未发车 ${carOverview[token.id].notSent} / 待收车 ${carOverview[token.id].claimable}（运输中 ${carOverview[token.id].inTransit}）`"
-                      >
-                        {{ carOverview[token.id].notSent }}/{{ carOverview[token.id].claimable }}
-                      </n-tag>
-                      <!-- 换皮闯关：已通关层数/8 -->
-                      <n-tag
-                        v-if="towerOverview[token.id]"
-                        size="small"
-                        :type="towerOverview[token.id].level >= 8 ? 'success' : 'default'"
-                        :bordered="towerOverview[token.id].level >= 8"
-                        :title="`换皮闯关今日已通关 ${towerOverview[token.id].level}/8 层`"
-                      >
-                        {{ towerOverview[token.id].level }}/8
-                      </n-tag>
-                      <!-- 显示token所属的分组 -->
-                      <n-tag
-                        v-for="group in tokenStore.getTokenGroups(token.id)"
-                        :key="group.id"
-                        size="small"
-                        :color="{ color: group.color, textColor: 'white' }"
-                        style="font-size: 11px"
-                      >
-                        {{ group.name }}
-                      </n-tag>
-                    </div>
-                    <n-button
-                      v-if="!isAccountListCollapsed"
-                      size="tiny"
-                      circle
-                      class="token-settings-btn"
-                      @click.stop="openSettings(token)"
-                    >
-                      <template #icon>
-                        <n-icon>
-                          <Settings />
-                        </n-icon>
-                      </template>
-                    </n-button>
-                  </div>
+                <n-grid-item v-for="token in sortedTokens" :key="token.id">
+                  <n-tooltip
+                    trigger="hover"
+                    placement="top"
+                    :style="{ whiteSpace: 'pre-line' }"
+                  >
+                    <template #trigger>
+                      <div class="token-row">
+                        <n-checkbox
+                          :value="token.id"
+                          :label="token.name"
+                          style="flex: 1"
+                        >
+                          <div class="token-item">
+                            <span>{{ token.name }}</span>
+                            <n-tag
+                              size="small"
+                              :type="getStatusType(token.id)"
+                              style="margin-left: 8px"
+                            >
+                              {{ getStatusText(token.id) }}
+                            </n-tag>
+                            <!-- 显示token所属的分组 -->
+                            <div
+                              v-if="tokenStore.getTokenGroups(token.id).length > 0"
+                              style="
+                                margin-left: 8px;
+                                display: inline-flex;
+                                gap: 4px;
+                                flex-wrap: wrap;
+                              "
+                            >
+                              <n-tag
+                                v-for="group in tokenStore.getTokenGroups(token.id)"
+                                :key="group.id"
+                                size="small"
+                                :color="{ color: group.color, textColor: 'white' }"
+                                style="font-size: 11px"
+                              >
+                                {{ group.name }}
+                              </n-tag>
+                            </div>
+                          </div>
+                        </n-checkbox>
+                        <n-button
+                          size="tiny"
+                          circle
+                          @click.stop="openSettings(token)"
+                        >
+                          <template #icon>
+                            <n-icon>
+                              <Settings />
+                            </n-icon>
+                          </template>
+                        </n-button>
+                      </div>
+                    </template>
+                    <span style="white-space: pre-line">{{
+                      getTokenPowerText(token.id)
+                    }}</span>
+                  </n-tooltip>
                 </n-grid-item>
               </n-grid>
             </n-checkbox-group>
@@ -433,192 +322,7 @@
 
         <!-- Batch Functions -->
         <n-card title="批量功能列表" style="margin-top: 16px">
-          <n-alert
-            v-if="dailyReminder"
-            type="warning"
-            title="今日重要提示"
-            style="margin-bottom: 12px"
-            :show-icon="true"
-          >
-            {{ dailyReminder }}
-          </n-alert>
           <n-tabs type="line" animated>
-            <n-tab-pane name="quickDaily" tab="每日">
-              <n-space align="center">
-                <n-button
-                  size="small"
-                  @click="claimHangUpRewards"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  领取挂机
-                </n-button>
-                <n-checkbox v-model:checked="claimHangUpOnly" size="small">
-                  仅领取，不加钟
-                </n-checkbox>
-                <n-button
-                  size="small"
-                  @click="resetBottles"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  重置罐子
-                </n-button>
-                <n-tooltip :disabled="isGoldBrickWeek()">
-                  <template #trigger>
-                    <n-button
-                      size="small"
-                      @click="skinChallenge"
-                      :disabled="
-                        isRunning ||
-                        selectedTokens.length === 0 ||
-                        !isGoldBrickWeek()
-                      "
-                    >
-                      换皮闯关(仅金砖周)
-                    </n-button>
-                  </template>
-                  当前非金砖周（黑市周），不可执行
-                </n-tooltip>
-                <n-button
-                  size="small"
-                  @click="batchLegacyClaim"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  功法券领取
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="quickMon" tab="周一">
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchStudy"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键答题
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartSendCar"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  智能发车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  一键收车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="legion_storebuygoods"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  四圣碎片
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="quickTue" tab="周二">
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchStudy"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键答题
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartSendCar"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  智能发车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  一键收车
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="quickWed" tab="周三">
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchStudy"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键答题
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartSendCar"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  智能发车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  一键收车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchBuyDreamItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !ismengjingActivityOpen
-                  "
-                >
-                  梦境商品
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="quickSun" tab="周日">
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchBuyDreamItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !ismengjingActivityOpen
-                  "
-                >
-                  梦境商品
-                </n-button>
-              </n-space>
-            </n-tab-pane>
             <n-tab-pane name="daily" tab="日常">
               <n-space>
                 <n-button
@@ -1020,29 +724,12 @@
               </div>
             </div>
           </template>
-          <div class="progress-wrapper">
-            <n-tooltip placement="top" :disabled="completedTokenNames.length === 0">
-              <template #trigger>
-                <n-progress
-                  type="line"
-                  :percentage="batchProgressPercentage"
-                  :indicator-placement="'inside'"
-                  :status="isRunning ? 'default' : (batchProgressPercentage === 100 ? 'success' : 'default')"
-                />
-              </template>
-              <div style="max-height: 300px; overflow-y: auto; white-space: nowrap;">
-                <div style="margin-bottom: 4px; font-weight: 600;">
-                  已完成 {{ completedTokenCount }}/{{ selectedTokens.length }}：
-                </div>
-                <div v-for="name in completedTokenNames" :key="name" style="line-height: 1.6;">
-                  {{ name }}
-                </div>
-              </div>
-            </n-tooltip>
-            <span class="progress-text">
-              {{ completedTokenCount }}/{{ selectedTokens.length }} 账号
-            </span>
-          </div>
+          <n-progress
+            type="line"
+            :percentage="currentProgress"
+            :indicator-placement="'inside'"
+            processing
+          />
           <div class="log-container" ref="logContainer">
             <div
               v-for="(log, index) in filteredLogs"
@@ -3172,17 +2859,18 @@ import {
   onMounted,
   onBeforeUnmount,
   h,
-  triggerRef,
 } from "vue";
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
-import { Settings, ChevronDown, ChevronUp } from "@vicons/ionicons5";
-import { workerSleep } from "@/utils/workerTimer.js";
+<<<<<<< Updated upstream
+import { Settings } from "@vicons/ionicons5";
 import { DEFAULT_WEIRD_TOWER_MAX_CLIMB } from "@/utils/towerClimbLimit.js";
-import { getTowerActId } from "@/utils/towerActId.js";
+=======
+import { Settings, Refresh } from "@vicons/ionicons5";
+>>>>>>> Stashed changes
 
 // Import batch task modules
 import {
@@ -3251,7 +2939,7 @@ const sortConfig = ref(
   savedSortConfig
     ? JSON.parse(savedSortConfig)
     : {
-        field: "createdAt", // 排序字段：name, server, createdAt, lastUsed, power
+        field: "createdAt", // 排序字段：name, server, createdAt, lastUsed
         direction: "asc", // 排序方向：asc, desc
       },
 );
@@ -3274,41 +2962,12 @@ const towerEnergy = computed(() => {
   return weirdTowerData.value?.energy || 0;
 });
 
-// 获取 token 所属分组中成员最少的分组信息（用于分组排序）
-const getTokenGroupSortInfo = (tokenId) => {
-  const groups = tokenGroups.value.filter((g) => g.tokenIds?.includes(tokenId));
-  if (groups.length === 0) return { memberCount: Infinity, groupId: "" };
-  let minGroup = groups[0];
-  for (const g of groups) {
-    const cnt = g.tokenIds?.length || 0;
-    if (cnt < (minGroup.tokenIds?.length || 0)) {
-      minGroup = g;
-    }
-  }
-  return { memberCount: minGroup.tokenIds?.length || 0, groupId: minGroup.id };
-};
-
 // 排序后的游戏角色Token列表
 const sortedTokens = computed(() => {
-  const result = [...gameTokens.value].sort((tokenA, tokenB) => {
-    // 分组排序：按组内成员数升序，同组内按战力降序
-    if (sortConfig.value.field === "group") {
-      const infoA = getTokenGroupSortInfo(tokenA.id);
-      const infoB = getTokenGroupSortInfo(tokenB.id);
-      if (infoA.memberCount !== infoB.memberCount) {
-        return infoA.memberCount - infoB.memberCount;
-      }
-      if (infoA.groupId !== infoB.groupId) {
-        return infoA.groupId < infoB.groupId ? -1 : 1;
-      }
-      const powerA = tokenA.power || 0;
-      const powerB = tokenB.power || 0;
-      return sortConfig.value.direction === "asc"
-        ? powerA - powerB
-        : powerB - powerA;
-    }
-
+  return [...tokenStore.gameTokens].sort((tokenA, tokenB) => {
     let valueA, valueB;
+
+    // 根据排序字段获取比较值
     switch (sortConfig.value.field) {
       case "name":
         valueA = tokenA.name?.toLowerCase() || "";
@@ -3326,15 +2985,12 @@ const sortedTokens = computed(() => {
         valueA = new Date(tokenA.lastUsed || 0).getTime();
         valueB = new Date(tokenB.lastUsed || 0).getTime();
         break;
-      case "power":
-        valueA = tokenA.power || 0;
-        valueB = tokenB.power || 0;
-        break;
       default:
         valueA = tokenA.name?.toLowerCase() || "";
         valueB = tokenB.name?.toLowerCase() || "";
     }
 
+    // 根据排序方向比较值
     if (valueA < valueB) {
       return sortConfig.value.direction === "asc" ? -1 : 1;
     }
@@ -3343,14 +2999,6 @@ const sortedTokens = computed(() => {
     }
     return 0;
   });
-  return result;
-});
-
-// 收起时只显示已选中的账号
-const displayedTokens = computed(() => {
-  if (!isAccountListCollapsed.value) return sortedTokens.value;
-  const selectedSet = new Set(selectedTokens.value);
-  return sortedTokens.value.filter((t) => selectedSet.has(t.id));
 });
 
 // 切换排序
@@ -3360,9 +3008,9 @@ const toggleSort = (field) => {
     sortConfig.value.direction =
       sortConfig.value.direction === "asc" ? "desc" : "asc";
   } else {
-    // 如果点击的是新的排序字段，则默认升序（分组排序默认降序：高战力优先）
+    // 如果点击的是新的排序字段，则默认升序
     sortConfig.value.field = field;
-    sortConfig.value.direction = field === "group" ? "desc" : "asc";
+    sortConfig.value.direction = "asc";
   }
 
   // 保存排序设置到localStorage
@@ -3375,7 +3023,7 @@ const getSortIcon = (field) => {
   return sortConfig.value.direction === "asc" ? "↑" : "↓";
 };
 
-const tokens = computed(() => gameTokens.value);
+const tokens = computed(() => tokenStore.gameTokens);
 const isCarActivityOpen = computed(() => {
   const now = new Date();
   const day = now.getDay();
@@ -3490,138 +3138,6 @@ const selectedTokens = ref([]);
 const tokenStatus = ref({}); // { tokenId: 'waiting' | 'running' | 'completed' | 'failed' }
 const isRunning = ref(false);
 const shouldStop = ref(false);
-const isAccountListCollapsed = ref(false);
-
-// =====================
-// 屏幕常亮（防止iOS熄屏）
-// =====================
-let wakeLockSentinel = null;
-let silentAudioEl = null;
-const wakeLockActive = ref(false);
-
-// 创建静音音频元素（后备方案，兼容不支持 Wake Lock API 的浏览器）
-const SILENT_AUDIO_SRC =
-  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
-
-const requestWakeLock = async () => {
-  // 方案1：Screen Wake Lock API（iOS 16.4+ / 现代浏览器）
-  if ("wakeLock" in navigator) {
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request("screen");
-      wakeLockSentinel.addEventListener("release", () => {
-        console.log("[WakeLock] 已释放");
-        wakeLockActive.value = false;
-      });
-      wakeLockActive.value = true;
-      console.log("[WakeLock] Screen wake lock 已获取");
-    } catch (err) {
-      console.warn("[WakeLock] Wake Lock API 失败:", err.message);
-    }
-  }
-
-  // 方案2：静音音频循环播放（后备方案，兼容旧版iOS）
-  // iOS 不会在播放音频时自动锁屏
-  if (!wakeLockActive.value) {
-    try {
-      if (!silentAudioEl) {
-        silentAudioEl = new Audio(SILENT_AUDIO_SRC);
-        silentAudioEl.loop = true;
-        silentAudioEl.volume = 0.001; // 极低音量
-      }
-      await silentAudioEl.play();
-      wakeLockActive.value = true;
-      console.log("[WakeLock] 静音音频已启动（后备方案）");
-    } catch (err) {
-      console.warn("[WakeLock] 静音音频失败:", err.message);
-    }
-  }
-};
-
-const releaseWakeLock = async () => {
-  if (wakeLockSentinel) {
-    try {
-      await wakeLockSentinel.release();
-      wakeLockSentinel = null;
-    } catch (err) {
-      console.warn("[WakeLock] 释放失败:", err);
-    }
-  }
-  if (silentAudioEl) {
-    try {
-      silentAudioEl.pause();
-      silentAudioEl.currentTime = 0;
-    } catch (err) {
-      console.warn("[WakeLock] 停止音频失败:", err);
-    }
-  }
-  wakeLockActive.value = false;
-};
-
-// 页面恢复可见时重新获取 wake lock（任务运行中）
-const handleWakeLockVisibility = async () => {
-  if (document.visibilityState === "visible" && isRunning.value) {
-    await requestWakeLock();
-  }
-};
-
-// 任务运行状态变化时获取/释放 wake lock
-watch(isRunning, async (running) => {
-  if (running) {
-    await requestWakeLock();
-  } else {
-    await releaseWakeLock();
-  }
-});
-
-// 每日重要提示（按星期）
-const dailyReminder = (() => {
-  const reminders = {
-    0: "梦境商品",           // 周日
-    1: "四圣碎片、答题、刷车", // 周一
-    3: "梦境商品、答题",      // 周三
-  };
-  return reminders[new Date().getDay()] || "";
-})();
-
-// =====================
-// 发车信息概览
-// =====================
-const carOverview = ref({}); // { [tokenId]: { total, notSent, inTransit, claimable, cars: [] } }
-const carOverviewLoading = ref(false);
-
-// 换皮闯关信息
-const towerOverview = ref({}); // { [tokenId]: { cleared, total } }
-const towerOverviewLoading = ref(false);
-
-// =====================
-// 领取挂机：仅领取，不加钟
-// =====================
-const claimHangUpOnly = ref(false);
-
-// =====================
-// 金砖周（黑市周）判断
-// 以 2026-06-19（周五）为基准，3周循环：黑市周(金砖)→招募周→宝箱周
-// =====================
-const getWeekOffset = () => {
-  const baseFriday = new Date("2026-06-19T00:00:00").getTime();
-  const weekMs = 7 * 24 * 60 * 60 * 1000;
-  const now = new Date();
-  const day = now.getDay(); // 0=Sun, 5=Fri
-  const diffToFriday = (day - 5 + 7) % 7;
-  const cycleFriday = new Date(now);
-  cycleFriday.setHours(0, 0, 0, 0);
-  cycleFriday.setDate(cycleFriday.getDate() - diffToFriday);
-  return Math.round((cycleFriday.getTime() - baseFriday) / weekMs);
-};
-
-const isGoldBrickWeek = () => getWeekOffset() % 3 === 0;
-
-// 当前周类型文字
-const currentWeekType = computed(() => {
-  const mod = ((getWeekOffset() % 3) + 3) % 3;
-  const types = ["黑市周", "招募周", "宝箱周"];
-  return types[mod];
-});
 
 // =====================
 // 战斗力缓存（按账号）
@@ -3629,7 +3145,7 @@ const currentWeekType = computed(() => {
 const tokenPowerMap = ref({}); // { [tokenId]: { power, powerText, updatedAt } }
 const isRefreshingPower = ref(false);
 
-// 写入战斗力缓存（同时持久化到 tokenStore，确保页面刷新后仍可读取）
+// 写入战斗力缓存
 const updateTokenPower = (tokenId, power) => {
   if (!tokenId || power == null) return;
   tokenPowerMap.value[tokenId] = {
@@ -3637,13 +3153,13 @@ const updateTokenPower = (tokenId, power) => {
     powerText: formatPower(power),
     updatedAt: new Date().toLocaleString(),
   };
-  // 同步写入 tokenStore（useLocalStorage 会自动持久化到 localStorage）
-  tokenStore.updateToken(tokenId, {
-    power,
-    powerUpdatedAt: new Date().toISOString(),
-  });
-  // 显式触发 gameTokens ref 的依赖更新，确保 sortedTokens 等 computed 重新计算
-  triggerRef(gameTokens);
+};
+
+// 获取账号悬浮战斗力文本
+const getTokenPowerText = (tokenId) => {
+  const info = tokenPowerMap.value[tokenId];
+  if (!info) return "未获取，请点击「刷新战力」";
+  return `战力: ${info.powerText}\n更新: ${info.updatedAt}`;
 };
 
 // 刷新选中账号的战斗力（若无选中则刷新全部）
@@ -3821,7 +3337,7 @@ const fetchWarGuessRank = async () => {
     const status = tokenStore.getWebSocketStatus(tokenId);
     if (status !== "connected") {
       tokenStore.createWebSocketConnection(tokenId, token.token, token.wsUrl);
-      await workerSleep(2000); // Wait for connection
+      await new Promise((r) => setTimeout(r, 2000)); // Wait for connection
     }
 
     // Fetch rank
@@ -4002,18 +3518,6 @@ const batchSettings = reactive({
   smartDepartureTicketThreshold: 0,
   smartDepartureMatchAll: false,
 });
-
-// 移动端检测：iOS/Android 等小屏设备自动切换为单列布局
-const isMobile = ref(false);
-const checkMobile = () => {
-  const ua = navigator.userAgent || navigator.vendor || window.opera;
-  const isMobileUA = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua.toLowerCase());
-  isMobile.value = isMobileUA || window.innerWidth <= 768;
-};
-const effectiveTokenListColumns = computed(() => {
-  return isMobile.value ? 1 : batchSettings.tokenListColumns;
-});
-
 
 // Load batch settings from localStorage
 const loadBatchSettings = () => {
@@ -4930,11 +4434,6 @@ onMounted(() => {
   loadTaskTemplates();
   // 监听Token刷新等待事件
   $emit.on("token:refresh:waiting", handleTokenRefreshWaiting);
-  // 移动端检测
-  checkMobile();
-  window.addEventListener("resize", checkMobile);
-  // 监听页面可见性变化，恢复 wake lock
-  document.addEventListener("visibilitychange", handleWakeLockVisibility);
 });
 
 // Cleanup countdown interval on unmount
@@ -4946,13 +4445,6 @@ onBeforeUnmount(() => {
 
   // 移除Token刷新等待事件监听
   $emit.off("token:refresh:waiting", handleTokenRefreshWaiting);
-
-  // 移除移动端检测监听
-  window.removeEventListener("resize", checkMobile);
-
-  // 移除 wake lock 可见性监听，并释放 wake lock
-  document.removeEventListener("visibilitychange", handleWakeLockVisibility);
-  releaseWakeLock();
 
   // Cleanup task scheduler intervals
   if (intervalId.value) {
@@ -5866,6 +5358,7 @@ const saveTaskTemplate = () => {
 };
 
 const currentRunningTokenId = ref(null);
+const currentProgress = ref(0);
 const logs = ref([]);
 const logContainer = ref(null);
 const autoScrollLog = ref(true);
@@ -5885,45 +5378,6 @@ const currentRunningTokenName = computed(() => {
   const t = tokens.value.find((x) => x.id === currentRunningTokenId.value);
   return t ? t.name : "";
 });
-
-// 批量任务进度：已完成账号数 / 已选中账号数
-const completedTokenCount = computed(() => {
-  return selectedTokens.value.filter((id) => {
-    const s = tokenStatus.value[id];
-    return s === "completed" || s === "failed";
-  }).length;
-});
-
-const batchProgressPercentage = computed(() => {
-  const total = selectedTokens.value.length;
-  if (total === 0) return 0;
-  return Math.round((completedTokenCount.value / total) * 100);
-});
-
-// 已完成账号名称列表（用于进度条 tooltip 展示）
-const completedTokenNames = computed(() => {
-  return selectedTokens.value
-    .filter((id) => {
-      const s = tokenStatus.value[id];
-      return s === "completed" || s === "failed";
-    })
-    .map((id) => {
-      const t = tokens.value.find((x) => x.id === id);
-      const status = tokenStatus.value[id];
-      const suffix = status === "failed" ? " (失败)" : "";
-      return `${t?.name || id}${suffix}`;
-    });
-});
-
-// 选中账号变化时，清空进度状态（重置进度条）
-watch(
-  () => [...selectedTokens.value],
-  () => {
-    if (!isRunning.value) {
-      tokenStatus.value = {};
-    }
-  },
-);
 
 // Selection logic
 const isAllSelected = computed(
@@ -6098,99 +5552,6 @@ const clearAllGroupSelection = () => {
 };
 
 /**
- * 从token name中提取短ID（最后一段数字，如"哇哇笑-0-545630303"→"545630303"）
- */
-const extractShortId = (tokenName) => {
-  const match = String(tokenName).match(/(\d+)$/);
-  return match ? match[1] : String(tokenName);
-};
-
-/**
- * 根据短ID查找当前gameTokens中的token
- */
-const findTokenByShortId = (shortId) => {
-  const sid = String(shortId);
-  return gameTokens.value.find((t) => extractShortId(t.name) === sid);
-};
-
-/**
- * 导出分组为JSON文件
- * 格式: [{ groupName, tokenIds: [短ID, ...] }]
- */
-const exportGroups = () => {
-  if (tokenGroups.value.length === 0) {
-    message.warning("没有分组可导出");
-    return;
-  }
-  const data = tokenGroups.value.map((g) => ({
-    groupName: g.name,
-    tokenIds: g.tokenIds.map((tid) => {
-      const token = gameTokens.value.find((t) => t.id === tid);
-      return token ? extractShortId(token.name) : tid;
-    }),
-  }));
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `token_groups_${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  message.success(`已导出 ${data.length} 个分组`);
-};
-
-/**
- * 从JSON文件导入分组
- */
-const importGroups = () => {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".json,application/json";
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (!Array.isArray(data)) {
-        message.error("JSON格式错误：应为数组");
-        return;
-      }
-      let groupCount = 0;
-      let matchCount = 0;
-      let missCount = 0;
-      for (const item of data) {
-        if (!item.groupName || !Array.isArray(item.tokenIds)) continue;
-        // 查找或创建分组
-        let group = tokenGroups.value.find((g) => g.name === item.groupName);
-        if (!group) {
-          group = tokenStore.createTokenGroup(item.groupName, "#2080f0");
-        }
-        // 根据短ID匹配token
-        for (const shortId of item.tokenIds) {
-          const token = findTokenByShortId(shortId);
-          if (token) {
-            tokenStore.addTokenToGroup(group.id, token.id);
-            matchCount++;
-          } else {
-            missCount++;
-          }
-        }
-        groupCount++;
-      }
-      message.success(
-        `导入完成：${groupCount}个分组，匹配${matchCount}个账号` +
-          (missCount > 0 ? `，未匹配${missCount}个` : ""),
-      );
-    } catch (err) {
-      message.error("导入失败：" + err.message);
-    }
-  };
-  input.click();
-};
-
-/**
  * 添加token到分组
  */
 const addTokenToSelectedGroup = (groupId, tokenId) => {
@@ -6301,7 +5662,7 @@ const waitForConnection = async (
   while (Date.now() - start < timeout) {
     const status = tokenStore.getWebSocketStatus(tokenId);
     if (status === "connected") return true;
-    await workerSleep(500);
+    await new Promise((r) => setTimeout(r, 500));
   }
   return false;
 };
@@ -6311,7 +5672,7 @@ const connectionQueue = { active: 0 };
 
 const waitForConnectionSlot = async () => {
   while (connectionQueue.active >= batchSettings.maxActive) {
-    await workerSleep(1000);
+    await new Promise((r) => setTimeout(r, 1000));
   }
   connectionQueue.active++;
 };
@@ -6356,7 +5717,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       });
 
       tokenStore.closeWebSocketConnection(tokenId);
-      await workerSleep(batchSettings.reconnectDelay);
+      await new Promise((r) => setTimeout(r, batchSettings.reconnectDelay));
 
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -6414,165 +5775,6 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
   return true;
 };
 
-// 查询发车信息概览（未发车/已发车/可收车）
-const fetchCarOverview = async () => {
-  const targetIds =
-    selectedTokens.value.length > 0
-      ? [...selectedTokens.value]
-      : tokens.value.map((t) => t.id);
-
-  if (targetIds.length === 0) {
-    message.warning("没有可查询的账号");
-    return;
-  }
-
-  carOverviewLoading.value = true;
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const tokenId of targetIds) {
-    if (shouldStop.value) break;
-    const token = tokens.value.find((t) => t.id === tokenId);
-    if (!token) {
-      failCount++;
-      continue;
-    }
-    try {
-      await ensureConnection(tokenId);
-      const res = await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "car_getrolecar",
-        {},
-        10000,
-      );
-      const carList = normalizeCars(res?.body ?? res);
-      let notSent = 0;
-      let inTransit = 0;
-      let claimable = 0;
-      for (const car of carList) {
-        if (Number(car.sendAt || 0) === 0) {
-          notSent++;
-        } else if (canClaim(car)) {
-          claimable++;
-        } else {
-          inTransit++;
-        }
-      }
-      carOverview.value[tokenId] = {
-        total: carList.length,
-        notSent,
-        inTransit,
-        claimable,
-        updatedAt: new Date().toLocaleTimeString(),
-      };
-      successCount++;
-    } catch (e) {
-      failCount++;
-      carOverview.value[tokenId] = {
-        total: 0,
-        notSent: 0,
-        inTransit: 0,
-        claimable: 0,
-        error: e.message,
-        updatedAt: new Date().toLocaleTimeString(),
-      };
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `查询发车信息失败 ${token?.name || tokenId}: ${e.message}`,
-        type: "warning",
-      });
-    } finally {
-      tokenStore.closeWebSocketConnection(tokenId);
-      releaseConnectionSlot();
-    }
-  }
-
-  carOverviewLoading.value = false;
-  message.success(`发车信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
-};
-
-// 查询换皮闯关关数
-// 今日开放 BOSS 类型映射（周五=1, 周六=2, 周日=3, 周一=4, 周二=5, 周三=6, 周四=全部）
-const todayTowerTypes = (() => {
-  const dayMap = { 5: [1], 6: [2], 0: [3], 1: [4], 2: [5], 3: [6], 4: [1, 2, 3, 4, 5, 6] };
-  return dayMap[new Date().getDay()] || [];
-})();
-
-// 从 levelRewardMap 计算今日 BOSS 的已通关层数（0-8，8=全部通关）
-const getTowerClearedLevel = (levelRewardMap, towerType) => {
-  for (let i = 8; i >= 1; i--) {
-    const key1 = `${towerType}00${i}`;
-    const key2 = Number(key1);
-    if (levelRewardMap[key1] || levelRewardMap[key2]) {
-      return i; // 最高已通关层
-    }
-  }
-  return 0; // 一层都没通关
-};
-
-const fetchTowerOverview = async () => {
-  const targetIds =
-    selectedTokens.value.length > 0
-      ? [...selectedTokens.value]
-      : tokens.value.map((t) => t.id);
-
-  if (targetIds.length === 0) {
-    message.warning("没有可查询的账号");
-    return;
-  }
-
-  towerOverviewLoading.value = true;
-  let successCount = 0;
-  let failCount = 0;
-  const computedActId = getTowerActId();
-
-  for (const tokenId of targetIds) {
-    if (shouldStop.value) break;
-    const token = tokens.value.find((t) => t.id === tokenId);
-    if (!token) {
-      failCount++;
-      continue;
-    }
-    try {
-      await ensureConnection(tokenId);
-      const res = await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "towers_getinfo",
-        { actId: computedActId },
-        10000,
-      );
-      const data = res?.actId ? res : (res?.towerData?.actId ? res.towerData : res);
-      const levelRewardMap = data?.levelRewardMap || {};
-      // 取今日开放 BOSS 中的最高已通关层数
-      let todayLevel = 0;
-      for (const type of todayTowerTypes) {
-        const level = getTowerClearedLevel(levelRewardMap, type);
-        if (level > todayLevel) todayLevel = level;
-      }
-      towerOverview.value[tokenId] = {
-        level: todayLevel,
-        total: 8,
-        updatedAt: new Date().toLocaleTimeString(),
-      };
-      successCount++;
-    } catch (e) {
-      failCount++;
-      towerOverview.value[tokenId] = {
-        level: 0,
-        total: 8,
-        error: e.message,
-        updatedAt: new Date().toLocaleTimeString(),
-      };
-    } finally {
-      tokenStore.closeWebSocketConnection(tokenId);
-      releaseConnectionSlot();
-    }
-  }
-
-  towerOverviewLoading.value = false;
-  message.success(`闯关信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
-};
-
 const createTaskDeps = () => ({
   selectedTokens,
   tokens,
@@ -6614,8 +5816,6 @@ const createTaskDeps = () => ({
   recipientInfo,
   securityPassword,
   giftQuantity,
-  // 领取挂机：仅领取，不加钟
-  claimHangUpOnly,
   // 竞技场相关辅助函数
   pickArenaTargetId,
   getTodayStartSec,
@@ -6802,7 +6002,7 @@ const batchFightBoss = async () => {
           { teamId: tokenSettings.bossFormation },
           5000,
         );
-        await workerSleep(batchSettings.commandDelay || 500);
+        await new Promise((r) => setTimeout(r, batchSettings.commandDelay || 500));
       }
 
       if (shouldStop.value) return;
@@ -6929,7 +6129,7 @@ const startBatch = async () => {
             type: "warning",
           });
           // Wait for potential token refresh in store
-          await workerSleep(3000);
+          await new Promise((r) => setTimeout(r, 3000));
           retryCount++;
         } else {
           tokenStatus.value[tokenId] = "failed";
@@ -6956,7 +6156,7 @@ const startBatch = async () => {
   await Promise.all(taskPromises);
 
   // 等待所有任务完成后再继续
-  await workerSleep(1000);
+  await new Promise((r) => setTimeout(r, 1000));
 
   isRunning.value = false;
   currentRunningTokenId.value = null;
@@ -7015,45 +6215,10 @@ const stopBatch = () => {
   align-items: center;
 }
 
-.token-tags {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  flex: 1;
-  margin-left: 8px;
-}
-
-.token-checkbox {
-  flex: 0 0 auto;
-}
-
-.token-settings-btn {
-  flex: 0 0 auto;
-}
-
 .log-card {
   height: 100%;
   display: flex;
   flex-direction: column;
-}
-
-.progress-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.progress-wrapper .n-progress {
-  flex: 1;
-}
-
-.progress-text {
-  font-size: 13px;
-  color: var(--text-secondary, #86909c);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 .custom-card-header {
@@ -7179,29 +6344,7 @@ const stopBatch = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
   padding-right: 8px;
-}
-
-/* 移动端：账号显示为两行，第一行为名称+设置按钮，第二行战斗力/状态/分组等标签 */
-@media (max-width: 768px) {
-  .token-row {
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .token-checkbox {
-    order: 1;
-    flex: 1 1 auto;
-  }
-  .token-settings-btn {
-    order: 2;
-  }
-  .token-tags {
-    order: 3;
-    flex-basis: 100%;
-    margin-left: 0;
-    margin-top: 4px;
-  }
 }
 
 /* Settings Modal Styles */

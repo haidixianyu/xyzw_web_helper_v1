@@ -1,3 +1,5 @@
+import { workerSleep } from "../workerTimer.js";
+
 /**
  * 商店类任务
  * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase, collection_claimfreereward
@@ -67,7 +69,7 @@ export function createTasksStore(deps) {
           5000,
         );
 
-        await new Promise((r) => setTimeout(r, delayConfig.action));
+        await workerSleep(delayConfig.action);
 
         if (result.error) {
           if (result.error.includes("俱乐部商品购买数量超出上限")) {
@@ -169,7 +171,7 @@ export function createTasksStore(deps) {
             5000,
           );
 
-          await new Promise((r) => setTimeout(r, delayConfig.action));
+          await workerSleep(delayConfig.action);
         }
 
         if (result && result.error) {
@@ -266,7 +268,7 @@ export function createTasksStore(deps) {
           5000,
         );
 
-        await new Promise((r) => setTimeout(r, delayConfig.action));
+        await workerSleep(delayConfig.action);
 
         if (result.error) {
           addLog({
@@ -349,7 +351,7 @@ export function createTasksStore(deps) {
           5000,
         );
 
-        await new Promise((r) => setTimeout(r, delayConfig.action));
+        await workerSleep(delayConfig.action);
 
         if (result.error) {
           addLog({

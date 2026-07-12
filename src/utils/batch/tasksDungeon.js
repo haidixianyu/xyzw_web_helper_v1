@@ -1,4 +1,5 @@
 import { isDungeonOpen, merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
+import { workerSleep } from "../workerTimer.js";
 
 /**
  * 宝库、梦境类任务
@@ -64,7 +65,7 @@ export function createTasksDungeon(deps) {
               "bosstower_startboss",
               {},
             );
-            await new Promise((r) => setTimeout(r, 500));
+            await workerSleep(500);
           }
           for (let i = 0; i < 9; i++) {
             if (shouldStop.value) break;
@@ -73,7 +74,7 @@ export function createTasksDungeon(deps) {
               "bosstower_startbox",
               {},
             );
-            await new Promise((r) => setTimeout(r, 500));
+            await workerSleep(500);
           }
         }
         tokenStatus.value[tokenId] = "completed";
@@ -144,7 +145,7 @@ export function createTasksDungeon(deps) {
               "bosstower_startboss",
               {},
             );
-            await new Promise((r) => setTimeout(r, 500));
+            await workerSleep(500);
           }
         }
         tokenStatus.value[tokenId] = "completed";
@@ -216,7 +217,7 @@ export function createTasksDungeon(deps) {
             { battleTeam: mjbattleTeam },
             5000,
           );
-          await new Promise((r) => setTimeout(r, 500));
+          await workerSleep(500);
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -372,7 +373,7 @@ export function createTasksDungeon(deps) {
           } catch (err) {
             failCount++;
           }
-          await new Promise((r) => setTimeout(r, 500));
+          await workerSleep(500);
         }
 
         tokenStatus.value[tokenId] = "completed";

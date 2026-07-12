@@ -1,3 +1,5 @@
+import { workerSleep } from "../workerTimer.js";
+
 /**
  * 车辆相关工具函数
  */
@@ -314,7 +316,7 @@ export function createCarManager({ tokenStore, connectionManager, batchSettings,
               },
               10000
             );
-            await new Promise((r) => setTimeout(r, 500));
+            await workerSleep(500);
             continue;
           }
 
@@ -352,7 +354,7 @@ export function createCarManager({ tokenStore, connectionManager, batchSettings,
               },
               10000
             );
-            await new Promise((r) => setTimeout(r, 500));
+            await workerSleep(500);
             continue;
           }
 
@@ -410,7 +412,7 @@ export function createCarManager({ tokenStore, connectionManager, batchSettings,
                 },
                 10000
               );
-              await new Promise((r) => setTimeout(r, 500));
+              await workerSleep(500);
               break;
             }
 
@@ -439,11 +441,11 @@ export function createCarManager({ tokenStore, connectionManager, batchSettings,
                 },
                 10000
               );
-              await new Promise((r) => setTimeout(r, 500));
+              await workerSleep(500);
               break;
             }
 
-            await new Promise((r) => setTimeout(r, 1000));
+            await workerSleep(1000);
           }
         } catch (carError) {
           addLog({
@@ -566,7 +568,7 @@ export function createCarManager({ tokenStore, connectionManager, batchSettings,
                   type: "success",
                 });
 
-                await new Promise((r) => setTimeout(r, 300));
+                await workerSleep(300);
               } catch (e) {
                 addLog({
                   time: new Date().toLocaleTimeString(),
@@ -602,7 +604,7 @@ export function createCarManager({ tokenStore, connectionManager, batchSettings,
               type: "warning",
             });
           }
-          await new Promise((r) => setTimeout(r, 300));
+          await workerSleep(300);
         }
       }
 

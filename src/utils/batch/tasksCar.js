@@ -4,6 +4,7 @@
  */
 
 import { CarresearchItem } from "./constants.js";
+import { workerSleep } from "../workerTimer.js";
 
 /**
  * 创建车辆类任务执行器
@@ -241,7 +242,7 @@ export function createTasksCar(deps) {
                 },
                 10000,
               );
-              await new Promise((r) => setTimeout(r, delayConfig.action));
+              await workerSleep(delayConfig.action);
               continue;
             }
 
@@ -278,7 +279,7 @@ export function createTasksCar(deps) {
                 },
                 10000,
               );
-              await new Promise((r) => setTimeout(r, delayConfig.action));
+              await workerSleep(delayConfig.action);
               continue;
             }
 
@@ -333,7 +334,7 @@ export function createTasksCar(deps) {
                   },
                   10000,
                 );
-                await new Promise((r) => setTimeout(r, delayConfig.action));
+                await workerSleep(delayConfig.action);
                 break;
               }
 
@@ -368,11 +369,11 @@ export function createTasksCar(deps) {
                   },
                   10000,
                 );
-                await new Promise((r) => setTimeout(r, delayConfig.action));
+                await workerSleep(delayConfig.action);
                 break;
               }
 
-              await new Promise((r) => setTimeout(r, delayConfig.refresh));
+              await workerSleep(delayConfig.refresh);
             }
           } catch (carError) {
             addLog({
@@ -515,7 +516,7 @@ export function createTasksCar(deps) {
                     type: "success",
                   });
 
-                  await new Promise((r) => setTimeout(r, delayConfig.action));
+                  await workerSleep(delayConfig.action);
                 } catch (e) {
                   addLog({
                     time: new Date().toLocaleTimeString(),
@@ -551,7 +552,7 @@ export function createTasksCar(deps) {
                 type: "warning",
               });
             }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+            await workerSleep(delayConfig.action);
           }
         }
 

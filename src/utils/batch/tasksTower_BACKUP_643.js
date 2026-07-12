@@ -1,5 +1,4 @@
 import { getTowerActId } from "../towerActId.js";
-import { workerSleep } from "../workerTimer.js";
 
 /**
  * 爬塔类任务
@@ -132,7 +131,7 @@ export function createTasksTower(deps) {
               type: "info",
             });
 
-            await workerSleep(1000);
+            await new Promise((r) => setTimeout(r, 1000));
 
             // Refresh energy
             // 默认每5次刷新一次，或体力不足时刷新
@@ -163,7 +162,7 @@ export function createTasksTower(deps) {
                 message: `${token.name} 操作过快 (200400)，等待5秒后重试...`,
                 type: "warning",
               });
-              await workerSleep(5000);
+              await new Promise((r) => setTimeout(r, 5000));
               continue;
             }
 
@@ -200,7 +199,7 @@ export function createTasksTower(deps) {
               }
 
               // 等待较长时间让领取生效
-              await workerSleep(3000);
+              await new Promise((r) => setTimeout(r, 3000));
               
               // 刷新角色信息以更新状态
               try {
@@ -229,7 +228,7 @@ export function createTasksTower(deps) {
               break;
             }
 
-            await workerSleep(2000);
+            await new Promise((r) => setTimeout(r, 2000));
 
             try {
               roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
@@ -402,7 +401,7 @@ export function createTasksTower(deps) {
               type: "info",
             });
 
-            await workerSleep(500);
+            await new Promise((r) => setTimeout(r, 500));
 
             const evotowerinfo2 = await tokenStore.sendMessageWithPromise(
               tokenId,
@@ -436,7 +435,7 @@ export function createTasksTower(deps) {
                             type: "success",
                          });
                       }).catch(() => {});
-                      await workerSleep(200); 
+                      await new Promise(r => setTimeout(r, 200)); 
                     }
                  }
             }
@@ -461,7 +460,7 @@ export function createTasksTower(deps) {
                 message: `${token.name} 成功领取第${Math.floor(towerId / 10)}章通关奖励！`,
                 type: "success",
               });
-              await workerSleep(1000);
+              await new Promise((r) => setTimeout(r, 1000));
             }
 
             // 刷新能量
@@ -493,7 +492,7 @@ export function createTasksTower(deps) {
               break;
             }
 
-            await workerSleep(1000);
+            await new Promise((r) => setTimeout(r, 1000));
 
             try {
               const evotowerinfoRefresh2 = await tokenStore.sendMessageWithPromise(
@@ -681,7 +680,11 @@ export function createTasksTower(deps) {
         let res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "towers_getinfo",
+<<<<<<< Updated upstream
           { actId: getTowerActId() },
+=======
+          { actId: computedActId },
+>>>>>>> Stashed changes
           5000
         );
         
@@ -788,12 +791,20 @@ export function createTasksTower(deps) {
 
             while (loop && !shouldStop.value) {
                 if (needStart) {
+<<<<<<< Updated upstream
                     await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: getTowerActId(), towerType: type }, 5000);
+=======
+                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type, actId: actId }, 5000);
+>>>>>>> Stashed changes
                     // 稍微等待一下
-                    await workerSleep(500);
+                    await new Promise(r => setTimeout(r, 500));
                 }
 
+<<<<<<< Updated upstream
                 const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: getTowerActId(), towerType: type }, 5000);
+=======
+                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type, actId: actId }, 5000);
+>>>>>>> Stashed changes
                 const battleData = fightRes?.battleData;
                 const curHP = battleData?.result?.accept?.ext?.curHP;
                 
@@ -809,8 +820,13 @@ export function createTasksTower(deps) {
                      needStart = false;
                      failCount = 0;
 
+<<<<<<< Updated upstream
                      // 刷新数据
                      res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: getTowerActId() }, 5000);
+=======
+                     // 刷新数据（带 actId）
+                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: actId }, 5000);
+>>>>>>> Stashed changes
                      towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
 
                      if (isTowerCleared(type)) {
@@ -821,7 +837,7 @@ export function createTasksTower(deps) {
                             type: "success",
                         });
                      } else {
-                        await workerSleep(1000);
+                        await new Promise(r => setTimeout(r, 1000));
                      }
                 } else {
                      addLog({
@@ -841,7 +857,7 @@ export function createTasksTower(deps) {
                          });
                          loop = false;
                      } else {
-                        await workerSleep(1000);
+                        await new Promise(r => setTimeout(r, 1000));
                      }
                 }
             }
@@ -976,7 +992,7 @@ export function createTasksTower(deps) {
           lotteryLeftCnt--;
           processedCount++;
 
-          await workerSleep(500);
+          await new Promise((res) => setTimeout(res, 500));
         }
 
         // 领取累计奖励
@@ -1114,7 +1130,7 @@ export function createTasksTower(deps) {
                    message: `${token.name} 领取合成奖励: ${taskDesc}`,
                    type: "success",
                  });
-                 await workerSleep(500);
+                 await new Promise((res) => setTimeout(res, 500));
               }
             }
           }
@@ -1176,7 +1192,7 @@ export function createTasksTower(deps) {
               { actType: 1 },
               10000 
             );
-            await workerSleep(1500);
+            await new Promise((res) => setTimeout(res, 1500));
           } else {
             // 8级以下手动合成
             for (const id in groupedItems) {
@@ -1198,13 +1214,13 @@ export function createTasksTower(deps) {
                   },
                   1000
                 ).catch(() => {});
-                await workerSleep(300);
+                await new Promise((res) => setTimeout(res, 300));
               }
             }
           }
           
           // 继续下一轮循环
-          await workerSleep(500);
+          await new Promise((res) => setTimeout(res, 500));
         }
 
         tokenStatus.value[tokenId] = "completed";

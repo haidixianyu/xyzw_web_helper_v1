@@ -4,6 +4,7 @@
  */
 
 import { FISH_TARGET, ARENA_TARGET } from "./constants.js";
+import { workerSleep } from "../workerTimer.js";
 
 /**
  * 创建竞技场、补齐类任务执行器
@@ -167,7 +168,7 @@ export function createTasksArena(deps) {
               message: `${token.name} 竞技场战斗 ${i + 1}/3`,
               type: "info",
             });
-            await new Promise((r) => setTimeout(r, delayConfig.battle));
+            await workerSleep(delayConfig.battle);
           } catch (e) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -176,7 +177,7 @@ export function createTasksArena(deps) {
             });
           }
         }
-        await new Promise((r) => setTimeout(r, delayConfig.battle));
+        await workerSleep(delayConfig.battle);
         if (Isswitching) {
           await tokenStore.sendMessageWithPromise(
             tokenId,
@@ -325,7 +326,7 @@ export function createTasksArena(deps) {
                 8000,
               );
               freeUsed++;
-              await new Promise((r) => setTimeout(r, delayConfig.action));
+              await workerSleep(delayConfig.action);
             } catch (e) {
               addLog({
                 time: new Date().toLocaleTimeString(),
@@ -430,7 +431,7 @@ export function createTasksArena(deps) {
                  }
             }
 
-            await new Promise((r) => setTimeout(r, delayConfig.battle));
+            await workerSleep(delayConfig.battle);
           } catch (e) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -493,7 +494,7 @@ export function createTasksArena(deps) {
                          {},
                          3000
                        );
-                       await new Promise((r) => setTimeout(r, 500)); 
+                       await workerSleep(500); 
                     } catch (err) {
                        addLog({
                           time: new Date().toLocaleTimeString(),
@@ -793,7 +794,7 @@ export function createTasksArena(deps) {
             }
 
             safetyCounter++;
-            await new Promise((r) => setTimeout(r, delayConfig.refresh));
+            await workerSleep(delayConfig.refresh);
           }
 
           const updatedResult = await tokenStore.sendMessageWithPromise(
