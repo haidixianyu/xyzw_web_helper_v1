@@ -452,9 +452,22 @@
                 >
                   领取挂机
                 </n-button>
-                <n-checkbox v-model:checked="claimHangUpOnly" size="small">
-                  仅领取，不加钟
-                </n-checkbox>
+                <span style="font-size: 12px; color: #666; margin-left: 4px;">加钟次数</span>
+                <n-input-number
+                  v-model:value="hangUpAddTimes"
+                  size="small"
+                  :min="0"
+                  :max="10"
+                  :step="1"
+                  style="width: 90px; margin-left: 4px;"
+                />
+                <n-button
+                  size="small"
+                  @click="batchAddHangUpTime"
+                  :disabled="isRunning || selectedTokens.length === 0 || hangUpAddTimes === 0"
+                >
+                  一键加钟
+                </n-button>
                 <n-button
                   size="small"
                   @click="resetBottles"
@@ -462,28 +475,54 @@
                 >
                   重置罐子
                 </n-button>
-                <n-tooltip :disabled="isGoldBrickWeek()">
-                  <template #trigger>
-                    <n-button
-                      size="small"
-                      @click="skinChallenge"
-                      :disabled="
-                        isRunning ||
-                        selectedTokens.length === 0 ||
-                        !isGoldBrickWeek()
-                      "
-                    >
-                      换皮闯关(仅金砖周)
-                    </n-button>
-                  </template>
-                  当前非金砖周（黑市周），不可执行
-                </n-tooltip>
+                <n-button
+                  size="small"
+                  @click="skinChallenge"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  换皮闯关
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="claimSkinChallengeRewards"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  领取闯关奖励
+                </n-button>
                 <n-button
                   size="small"
                   @click="batchLegacyClaim"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   功法券领取
+                </n-button>
+                <n-popselect
+                  :value="footballPick"
+                  :options="footballPickOptions"
+                  trigger="click"
+                  @update:value="onFootballPickChange"
+                >
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    一键竞猜({{ footballPickLabel }})
+                  </n-button>
+                </n-popselect>
+                <n-input-number
+                  v-model:value="apexScheduleId"
+                  size="small"
+                  :min="1"
+                  :max="999"
+                  :step="1"
+                  style="width: 90px;"
+                />
+                <n-button
+                  size="small"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  @click="batchApexGuess(apexScheduleId)"
+                >
+                  逐鹿盐山竞猜
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -771,6 +810,19 @@
                 >
                   一键购买梦境商品
                 </n-button>
+                <n-popselect
+                  :value="footballPick"
+                  :options="footballPickOptions"
+                  trigger="click"
+                  @update:value="onFootballPickChange"
+                >
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    一键竞猜({{ footballPickLabel }})
+                  </n-button>
+                </n-popselect>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="baoku" tab="宝库">
@@ -3236,6 +3288,8 @@ import {
   createTasksArena,
   createTasksStore,
   createTasksLegacy,
+  createTasksFootball,
+  createTasksApex,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -3594,9 +3648,9 @@ const towerOverview = ref({}); // { [tokenId]: { cleared, total } }
 const towerOverviewLoading = ref(false);
 
 // =====================
-// 领取挂机：仅领取，不加钟
+// 领取挂机：加钟次数（默认2，0=仅领取不加钟）
 // =====================
-const claimHangUpOnly = ref(false);
+const hangUpAddTimes = ref(2);
 
 // =====================
 // 金砖周（黑市周）判断
@@ -6614,8 +6668,8 @@ const createTaskDeps = () => ({
   recipientInfo,
   securityPassword,
   giftQuantity,
-  // 领取挂机：仅领取，不加钟
-  claimHangUpOnly,
+  // 领取挂机：加钟次数
+  hangUpAddTimes,
   // 竞技场相关辅助函数
   pickArenaTargetId,
   getTodayStartSec,
@@ -6644,6 +6698,7 @@ const {
   climbWeirdTower,
   batchClaimFreeEnergy,
   skinChallenge,
+  claimSkinChallengeRewards,
   batchUseItems,
   batchMergeItems,
 } = tasksTower;
@@ -6682,6 +6737,28 @@ const {
 
 const tasksLegacy = createTasksLegacy(createTaskDeps());
 const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;
+
+const tasksFootball = createTasksFootball(createTaskDeps());
+const { batchFootballBet } = tasksFootball;
+
+const tasksApex = createTasksApex(createTaskDeps());
+const { batchApexGuess } = tasksApex;
+
+// 盐杯竞猜 pick 选择
+const footballPick = ref(3);
+const apexScheduleId = ref(46);
+const footballPickOptions = [
+  { label: "主胜", value: 1 },
+  { label: "平局", value: 2 },
+  { label: "客胜", value: 3 },
+];
+const footballPickLabel = computed(() => {
+  return footballPickOptions.find((o) => o.value === footballPick.value)?.label || "";
+});
+const onFootballPickChange = async (val) => {
+  footballPick.value = val;
+  await batchFootballBet(val);
+};
 
 const refreshBattleVersion = async (tokenId) => {
   const res = await tokenStore.sendMessageWithPromise(

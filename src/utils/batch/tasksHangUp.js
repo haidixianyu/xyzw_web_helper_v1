@@ -25,7 +25,7 @@ export function createTasksHangUp(deps) {
     addLog,
     message,
     currentRunningTokenId,
-    claimHangUpOnly,
+    hangUpAddTimes,
   } = deps;
 
   /**
@@ -71,13 +71,14 @@ export function createTasksHangUp(deps) {
         );
         await workerSleep(500);
 
-        // 2. Add time 4 times（仅领取模式下跳过加钟）
-        if (!claimHangUpOnly?.value) {
-          for (let i = 0; i < 4; i++) {
+        // 2. Add time（次数可配置，0=仅领取不加钟）
+        const addTimes = hangUpAddTimes?.value ?? 2;
+        if (addTimes > 0) {
+          for (let i = 0; i < addTimes; i++) {
             if (shouldStop.value) break;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 挂机加钟 ${i + 1}/4`,
+              message: `${token.name} 挂机加钟 ${i + 1}/${addTimes}`,
               type: "info",
             });
             await tokenStore.sendMessageWithPromise(
@@ -91,7 +92,7 @@ export function createTasksHangUp(deps) {
         } else {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 已开启「仅领取，不加钟」，跳过加钟`,
+            message: `${token.name} 加钟次数为0，跳过加钟`,
             type: "info",
           });
         }
@@ -133,6 +134,11 @@ export function createTasksHangUp(deps) {
    */
   const batchAddHangUpTime = async () => {
     if (selectedTokens.value.length === 0) return;
+    const addTimes = hangUpAddTimes?.value ?? 2;
+    if (addTimes <= 0) {
+      message.info("加钟次数为0，不执行加钟");
+      return;
+    }
     isRunning.value = true;
     shouldStop.value = false;
 
@@ -147,15 +153,15 @@ export function createTasksHangUp(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始一键加钟: ${token.name} ===`,
+          message: `=== 开始一键加钟: ${token.name} (共${addTimes}次) ===`,
           type: "info",
         });
         await ensureConnection(tokenId);
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < addTimes; i++) {
           if (shouldStop.value) break;
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 执行加钟 ${i + 1}/4`,
+            message: `${token.name} 执行加钟 ${i + 1}/${addTimes}`,
             type: "info",
           });
           await tokenStore.sendMessageWithPromise(

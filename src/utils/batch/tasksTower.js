@@ -633,6 +633,52 @@ export function createTasksTower(deps) {
   };
 
   /**
+   * 领取换皮闯关活动奖励（循环领奖直到服务端返回错误）
+   * @param {string} tokenId
+   * @param {Object} token
+   * @param {number} [actId] - 可选，指定活动ID；默认使用当前周期 actId
+   */
+  const claimTowerRewards = async (tokenId, token, actId) => {
+    const towerActId = actId || getTowerActId();
+    // 领奖活动ID通常为挑战活动ID+1（末尾1→2）
+    const claimActId = towerActId % 10 === 1 ? towerActId + 1 : towerActId;
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${token.name} 开始领取换皮闯关奖励 (actId=${claimActId})`,
+      type: "info",
+    });
+
+    let claimCount = 0;
+    try {
+      while (!shouldStop.value) {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_startactegame",
+          { actId: claimActId },
+          5000,
+        );
+        claimCount++;
+        if (claimCount % 10 === 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已领取换皮闯关奖励 ${claimCount} 次`,
+            type: "success",
+          });
+        }
+        await workerSleep(300);
+      }
+    } catch (e) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 换皮闯关奖励领取结束（共 ${claimCount} 次）${e?.message ? "，原因：" + e.message : ""}`,
+        type: claimCount > 0 ? "success" : "info",
+      });
+    }
+    return claimCount;
+  };
+
+  /**
    * 换皮闯关
    */
   const skinChallenge = async () => {
@@ -866,6 +912,66 @@ export function createTasksTower(deps) {
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 换皮闯关失败: ${errorMessage}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 断开连接`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+  };
+
+  /**
+   * 单独领取换皮闯关奖励（每日 tab 用）
+   */
+  const claimSkinChallengeRewards = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始领取换皮闯关奖励: ${token.name} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+        await tokenStore.sendGetRoleInfo(tokenId).catch(() => {});
+        await claimTowerRewards(tokenId, token);
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 换皮闯关奖励领取完成 ===`,
+          type: "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 领取换皮闯关奖励失败: ${error.message}`,
           type: "error",
         });
       } finally {
@@ -1244,6 +1350,7 @@ export function createTasksTower(deps) {
     climbWeirdTower,
     batchClaimFreeEnergy,
     skinChallenge,
+    claimSkinChallengeRewards,
     batchUseItems,
     batchMergeItems,
   };

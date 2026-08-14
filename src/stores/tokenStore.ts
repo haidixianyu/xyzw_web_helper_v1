@@ -852,17 +852,6 @@ export const useTokenStore = defineStore("tokens", () => {
         const cmd = message?.cmd || "unknown";
         wsLogger.wsMessage(tokenId, cmd, true);
 
-        // === 抓包调试日志：记录所有收到的WebSocket命令 ===
-        const token = wsConnections.value[tokenId];
-        const tokenName = token?.actualToken
-          ? token.actualToken.substring(0, 8) + "..."
-          : tokenId;
-        console.log(
-          `%c[WS收] ${tokenName} ← ${cmd}`,
-          "color: #1890ff; font-weight: bold;",
-          message,
-        );
-
         if (wsConnections.value[tokenId]) {
           wsConnections.value[tokenId].lastMessage = {
             timestamp: new Date().toISOString(),
@@ -987,13 +976,6 @@ export const useTokenStore = defineStore("tokens", () => {
       client.send(cmd, params, options);
       wsLogger.wsMessage(tokenId, cmd, false);
 
-      // === 抓包调试日志：记录所有发出的WebSocket命令 ===
-      console.log(
-        `%c[WS发] ${tokenId.substring(0, 8)}... → ${cmd}`,
-        "color: #52c41a; font-weight: bold;",
-        params,
-      );
-
       return true;
     } catch (error) {
       wsLogger.error(`发送失败 [${tokenId}] ${cmd}:`, error.message);
@@ -1036,21 +1018,7 @@ export const useTokenStore = defineStore("tokens", () => {
     }
 
     try {
-      // === 抓包调试日志：记录所有发出的WebSocket命令（Promise版） ===
-      console.log(
-        `%c[WS发] ${tokenId.substring(0, 8)}... → ${cmd}`,
-        "color: #52c41a; font-weight: bold;",
-        params,
-      );
-
       const result = await client.sendWithPromise(cmd, params, timeout);
-
-      // === 抓包调试日志：记录响应 ===
-      console.log(
-        `%c[WS收] ${tokenId.substring(0, 8)}... ← ${cmd} (响应)`,
-        "color: #1890ff; font-weight: bold;",
-        result,
-      );
 
       // 特殊日志：fight_starttower 响应
       if (cmd === "fight_starttower") {
