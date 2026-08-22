@@ -51,6 +51,28 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
   };
 
   /**
+   * 格式化连接失败原因
+   */
+  const formatConnectionFailure = (tokenId, info) => {
+    const parts = [`状态: ${info?.status || "未知"}`];
+    if (info?.crossTab) {
+      const time = info.crossTab.timestamp
+        ? new Date(info.crossTab.timestamp).toLocaleTimeString()
+        : "";
+      parts.push(`其他标签页已连接${time ? ` (${time})` : ""}`);
+    }
+    if (info?.lock) parts.push("连接锁被占用");
+    if (info?.lastError) {
+      const err =
+        typeof info.lastError === "string"
+          ? info.lastError
+          : info.lastError.error || JSON.stringify(info.lastError);
+      parts.push(`最后错误: ${err}`);
+    }
+    return parts.join("，");
+  };
+
+  /**
    * 确保连接建立
    * @param {string} tokenId - Token ID
    * @param {object} tokens - Tokens列表
@@ -83,9 +105,10 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
       connected = await waitForConnection(tokenId);
 
       if (!connected && maxRetries > 0) {
+        const info = tokenStore.getConnectionInfo?.(tokenId);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `连接超时，尝试重连...`,
+          message: `连接超时，尝试重连... (${formatConnectionFailure(tokenId, info)})`,
           type: "warning",
         });
 
@@ -111,7 +134,14 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
       if (!connected) {
         // 连接失败，释放槽位
         releaseConnectionSlot();
-        throw new Error("连接失败 (重试后仍超时)");
+        const info = tokenStore.getConnectionInfo?.(tokenId);
+        const reason = formatConnectionFailure(tokenId, info);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `连接失败: ${reason}`,
+          type: "error",
+        });
+        throw new Error(`连接失败 (${reason})`);
       }
     }
 

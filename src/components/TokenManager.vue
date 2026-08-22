@@ -10,13 +10,25 @@
           </template>
           <span class="btn-text">刷新</span>
         </n-button>
-        <n-button size="small" type="warning" @click="exportTokens">
-          <template #icon>
-            <i class="i-mdi:download"></i>
-          </template>
-          <span class="btn-text">导出</span>
-        </n-button>
-        <n-upload :show-file-list="false" accept=".json" @change="importTokens">
+        <n-dropdown
+          :options="exportOptions"
+          trigger="click"
+          size="small"
+          @select="handleExportAction"
+        >
+          <n-button size="small" type="warning">
+            <template #icon>
+              <i class="i-mdi:download"></i>
+            </template>
+            <span class="btn-text">导出</span>
+          </n-button>
+        </n-dropdown>
+        <n-dropdown
+          :options="importOptions"
+          trigger="click"
+          size="small"
+          @select="handleImportAction"
+        >
           <n-button size="small" type="info">
             <template #icon>
               <n-icon>
@@ -25,7 +37,7 @@
             </template>
             <span class="btn-text">导入</span>
           </n-button>
-        </n-upload>
+        </n-dropdown>
       </div>
     </template>
     <template #default>
@@ -141,7 +153,7 @@
 
 <script setup>
 import { ref, h } from "vue";
-import { useMessage, useDialog, NIcon } from "naive-ui";
+import { useMessage, useDialog, NIcon, NDropdown } from "naive-ui";
 import { gameTokens } from "@/stores/tokenStore";
 import { useLocalTokenStore } from "@/stores/localTokenManager";
 import { useGameRolesStore } from "@/stores/gameRoles";
@@ -497,9 +509,22 @@ const refreshTokenFromUrl = async (roleId, tokenData) => {
   });
 };
 
-const exportTokens = () => {
+const exportOptions = [
+  { label: "导出Token", key: "export" },
+  { label: "导出Token（含BIN）", key: "exportWithBin" },
+];
+
+const handleExportAction = (key) => {
+  if (key === "export") {
+    exportTokens();
+  } else if (key === "exportWithBin") {
+    exportTokensWithBin();
+  }
+};
+
+const exportTokens = async () => {
   try {
-    const tokenData = localTokenStore.exportTokens();
+    const tokenData = await localTokenStore.exportTokens();
     const dataStr = JSON.stringify(tokenData, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
 
@@ -514,12 +539,46 @@ const exportTokens = () => {
   }
 };
 
-const importTokens = ({ file }) => {
+const exportTokensWithBin = async () => {
+  try {
+    const tokenData = await localTokenStore.exportTokens(true);
+    const dataStr = JSON.stringify(tokenData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `tokens_backup_with_bin_${new Date().toISOString().split("T")[0]}.json`;
+    link.click();
+
+    message.success("Token及BIN数据已导出");
+  } catch (error) {
+    message.error("导出失败: " + error.message);
+  }
+};
+
+const importOptions = [
+  { label: "导入Token文件", key: "import" },
+  { label: "导入Token文件（含BIN）", key: "importWithBin" },
+];
+
+const handleImportAction = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (file) importTokens(file);
+  };
+  input.click();
+};
+
+const importTokens = (file) => {
+  const actualFile = file.file || file;
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     try {
       const tokenData = JSON.parse(e.target.result);
-      const result = localTokenStore.importTokens(tokenData);
+      const result = await localTokenStore.importTokens(tokenData);
 
       if (result.success) {
         message.success(result.message);
@@ -532,7 +591,7 @@ const importTokens = ({ file }) => {
       message.error("导入失败：文件格式错误");
     }
   };
-  reader.readAsText(file.file);
+  reader.readAsText(actualFile);
 };
 
 const cleanExpiredTokens = () => {

@@ -47,7 +47,7 @@
 
         <!-- Opponent Club (Right) -->
         <div class="club-info opponent">
-          <n-avatar round :size="80" :src="battleInfo.opponentClub?.logo || '/icons/xiaoyugan.png'" class="club-logo" />
+          <n-avatar round :size="48" :src="battleInfo.opponentClub?.logo || '/icons/xiaoyugan.png'" class="club-logo" />
           <div class="club-details">
             <div class="club-name">{{ battleInfo.opponentClub.serverId }}服 {{ battleInfo.opponentClub?.name || "未知" }}
             </div>
@@ -482,7 +482,7 @@ const disabledDate = (ts) => {
 };
 
 const formatDateToShort = (dateStr) => {
-  if (!dateStr) return ''
+  if (!dateStr || typeof dateStr !== 'string') return ''
   const parts = dateStr.split('/')
   if (parts.length !== 3) return dateStr
   const [year, month, day] = parts
@@ -1109,10 +1109,9 @@ const columns = [
 ];
 
 //日期选择时调用查询战绩方法
-const fetchBattleRecordsByDate = (val) => {
-  if (undefined != val) {
-    queryDate.value = val
-  } else {
+const fetchBattleRecordsByDate = () => {
+  // v-model 已同步 queryDate；此处仅兜底空值，不再用可能为事件对象的回调参数覆盖
+  if (!queryDate.value) {
     queryDate.value = getLastSunday();
   }
   fetchBattleInfo();
@@ -1491,17 +1490,17 @@ onMounted(() => {
 
 .main-title {
   text-align: center;
-  margin: 0 0 16px 0;
-  font-size: 20px;
+  margin: 0 0 8px 0;
+  font-size: 16px;
   font-weight: bold;
   color: #333;
 }
 
 .header-section {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   background: linear-gradient(to bottom, #fff5f5, #fff);
-  padding: 16px;
+  padding: 10px 16px;
   border-radius: 12px;
   border: 1px solid #ffccc7;
   flex-shrink: 0;
@@ -1511,8 +1510,8 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 20px;
-  margin-bottom: 10px;
+  gap: 12px;
+  margin-bottom: 0;
   width: 100%;
 }
 
@@ -1520,7 +1519,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .club-info.own {
@@ -1532,7 +1531,7 @@ onMounted(() => {
 }
 
 .club-logo {
-  border: 4px solid #fff;
+  border: 3px solid #fff;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
   transition: all 0.3s ease;
   cursor: default;
@@ -1549,13 +1548,13 @@ onMounted(() => {
 }
 
 .club-name {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: bold;
   color: #333;
 }
 
 .club-stats {
-  font-size: 14px;
+  font-size: 12px;
   color: #ff4d4f;
 
   &.announcement {
@@ -1567,7 +1566,7 @@ onMounted(() => {
 }
 
 .vs-badge {
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 900;
   color: #ff7875;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
@@ -1590,7 +1589,7 @@ onMounted(() => {
 }
 
 .members-table {
-  margin-top: 20px;
+  margin-top: 12px;
   flex: 1;
   overflow: hidden;
   /* Use NDataTable's scroll or auto here */

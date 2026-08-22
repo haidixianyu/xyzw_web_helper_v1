@@ -1,4 +1,4 @@
-export const DEFAULT_WEIRD_TOWER_MAX_CLIMB = 100;
+export const DEFAULT_WEIRD_TOWER_MAX_CLIMB = 10;
 
 export function normalizeWeirdTowerMaxClimb(
   value,

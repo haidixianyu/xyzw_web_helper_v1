@@ -1,28 +1,5 @@
 <template>
   <div class="records-container">
-    <!-- 头部信息区 -->
-    <div class="header-section">
-      <div class="header-left">
-        <img
-          src="/icons/1733492491706152.png"
-          alt="蟠桃图标"
-          class="header-icon"
-        />
-        <div class="header-title">
-          <h2>蟠桃园战绩</h2>
-          <p>查看蟠桃园对战详细数据</p>
-        </div>
-      </div>
-
-      <!-- 数据统计区 -->
-      <div class="stats-section" v-if="battleRecords && battleRecords.ownClub">
-        <div class="stat-item">
-          <span class="stat-label">查询日期:</span>
-          <n-tag type="info">{{ queryDate }}</n-tag>
-        </div>
-      </div>
-    </div>
-
     <!-- 功能操作区 -->
     <div class="function-section">
       <div class="function-left">
@@ -85,6 +62,66 @@
       <!-- 战绩列表 -->
       <div v-else-if="battleRecords && battleRecords.ownClub && battleRecords.opponentClub" ref="exportDom" class="records-wrapper">
         <div v-if="currentStyle === 'default'" class="style-default">
+          <!-- 战神榜（置顶） -->
+          <div class="god-rankings">
+            <div class="god-ranking own">
+              <div class="god-ranking-title">我方战神榜</div>
+              <div class="god-ranking-content">
+                <div class="god-ranking-header">
+                  <div class="god-rank-number">排名</div>
+                  <div class="header-avatar"></div>
+                  <div class="header-player">玩家</div>
+                  <div class="header-stat">击杀</div>
+                  <div class="header-stat">连杀</div>
+                  <div class="header-stat">抢船</div>
+                  <div class="header-stat">复活</div>
+                  <div class="header-stat">K/D</div>
+                </div>
+                <div v-for="(player, index) in battleRecords.ownClub.godRank" :key="index" class="god-ranking-item">
+                  <div class="god-rank-number">{{ index + 1 }}</div>
+                  <div class="player-avatar-cell">
+                    <img v-if="player.roleInfo.headImg" :src="player.roleInfo.headImg" :alt="player.roleInfo.name" class="player-avatar" @error="handleImageError">
+                    <div v-else class="player-avatar-placeholder">{{ player.roleInfo.name?.charAt(0) || '?' }}</div>
+                  </div>
+                  <span class="header-player">{{ player.roleInfo.name }}</span>
+                  <span class="player-stat">{{ player.killCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.mCKCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.carCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.reviveCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.kd || 0 }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="god-ranking opponent">
+              <div class="god-ranking-title">敌方战神榜</div>
+              <div class="god-ranking-content">
+                <div class="god-ranking-header">
+                  <div class="god-rank-number">排名</div>
+                  <div class="header-avatar"></div>
+                  <div class="header-player">玩家</div>
+                  <div class="header-stat">击杀</div>
+                  <div class="header-stat">连杀</div>
+                  <div class="header-stat">抢船</div>
+                  <div class="header-stat">复活</div>
+                  <div class="header-stat">K/D</div>
+                </div>
+                <div v-for="(player, index) in battleRecords.opponentClub.godRank" :key="index" class="god-ranking-item">
+                  <div class="god-rank-number">{{ index + 1 }}</div>
+                  <div class="player-avatar-cell">
+                    <img v-if="player.roleInfo.headImg" :src="player.roleInfo.headImg" :alt="player.roleInfo.name" class="player-avatar" @error="handleImageError">
+                    <div v-else class="player-avatar-placeholder">{{ player.roleInfo.name?.charAt(0) || '?' }}</div>
+                  </div>
+                  <span class="header-player">{{ player.roleInfo.name }}</span>
+                  <span class="player-stat">{{ player.killCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.mCKCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.carCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.reviveCnt || 0 }}</span>
+                  <span class="player-stat">{{ player.kd || 0 }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 头部对战信息 -->
           <div class="battle-header">
             <h2>{{ queryDate }} {{ battleRecords.ownClub.name }} VS {{ battleRecords.opponentClub.name }} 蟠桃大会对战战绩</h2>
@@ -222,66 +259,6 @@
                     <span class="player-name">{{ player.roleInfo.name }}</span>
                     <span class="player-value">{{ player.reviveCnt || 0 }}</span>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 战神榜 -->
-          <div class="god-rankings">
-            <div class="god-ranking own">
-              <div class="god-ranking-title">我方战神榜</div>
-              <div class="god-ranking-content">
-                <div class="god-ranking-header">
-                  <div class="god-rank-number">排名</div>
-                  <div class="header-avatar"></div>
-                  <div class="header-player">玩家</div>
-                  <div class="header-stat">击杀</div>
-                  <div class="header-stat">连杀</div>
-                  <div class="header-stat">抢船</div>
-                  <div class="header-stat">复活</div>
-                  <div class="header-stat">K/D</div>
-                </div>
-                <div v-for="(player, index) in battleRecords.ownClub.godRank" :key="index" class="god-ranking-item">
-                  <div class="god-rank-number">{{ index + 1 }}</div>
-                  <div class="player-avatar-cell">
-                    <img v-if="player.roleInfo.headImg" :src="player.roleInfo.headImg" :alt="player.roleInfo.name" class="player-avatar" @error="handleImageError">
-                    <div v-else class="player-avatar-placeholder">{{ player.roleInfo.name?.charAt(0) || '?' }}</div>
-                  </div>
-                  <span class="header-player">{{ player.roleInfo.name }}</span>
-                  <span class="player-stat">{{ player.killCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.mCKCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.carCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.reviveCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.kd || 0 }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="god-ranking opponent">
-              <div class="god-ranking-title">敌方战神榜</div>
-              <div class="god-ranking-content">
-                <div class="god-ranking-header">
-                  <div class="god-rank-number">排名</div>
-                  <div class="header-avatar"></div>
-                  <div class="header-player">玩家</div>
-                  <div class="header-stat">击杀</div>
-                  <div class="header-stat">连杀</div>
-                  <div class="header-stat">抢船</div>
-                  <div class="header-stat">复活</div>
-                  <div class="header-stat">K/D</div>
-                </div>
-                <div v-for="(player, index) in battleRecords.opponentClub.godRank" :key="index" class="god-ranking-item">
-                  <div class="god-rank-number">{{ index + 1 }}</div>
-                  <div class="player-avatar-cell">
-                    <img v-if="player.roleInfo.headImg" :src="player.roleInfo.headImg" :alt="player.roleInfo.name" class="player-avatar" @error="handleImageError">
-                    <div v-else class="player-avatar-placeholder">{{ player.roleInfo.name?.charAt(0) || '?' }}</div>
-                  </div>
-                  <span class="header-player">{{ player.roleInfo.name }}</span>
-                  <span class="player-stat">{{ player.killCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.mCKCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.carCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.reviveCnt || 0 }}</span>
-                  <span class="player-stat">{{ player.kd || 0 }}</span>
                 </div>
               </div>
             </div>
@@ -862,7 +839,7 @@ const formatPower = (power) => {
 }
 
 const formatDateToShort = (dateStr) => {
-  if (!dateStr) return ''
+  if (!dateStr || typeof dateStr !== 'string') return ''
   const parts = dateStr.split('/')
   if (parts.length !== 3) return dateStr
   const [year, month, day] = parts
@@ -927,10 +904,9 @@ const disabledDate = current => {
 }
 
 //日期选择时调用查询战绩方法
-const fetchBattleRecordsByDate = (val)=>{
-  if(undefined != val){
-    queryDate.value = val
-  }else{
+const fetchBattleRecordsByDate = ()=>{
+  // v-model 已同步 queryDate；此处仅兜底空值，不再用可能为事件对象的回调参数覆盖
+  if(!queryDate.value){
     queryDate.value = getLastSunday();
   }
   fetchBattleRecords();
@@ -1654,7 +1630,7 @@ onMounted(() => {
 }
 
 .god-ranking-content {
-  max-height: 400px;
+  max-height: 560px;
   overflow-y: auto;
   padding-right: var(--spacing-xs);
 }

@@ -633,6 +633,8 @@ import WxQrcodeForm from "./wxqrcode.vue";
 import { useTokenStore, selectedTokenId } from "@/stores/tokenStore";
 import {
   Add,
+  CloudDownload,
+  CloudUpload,
   Copy,
   Create,
   EllipsisHorizontal,
@@ -826,8 +828,16 @@ const editRules = {
 const bulkOptions = [
   { label: "刷新所有Token", key: "refreshAll" },
   { label: "更新token信息", key: "updateInfo" },
-  { label: "导出所有Token", key: "export" },
-  { label: "导入Token文件", key: "import" },
+  { type: "divider" },
+  { label: "导出Token", key: "export" },
+  { label: "导入Token", key: "import" },
+  { type: "divider" },
+  { label: "导出BIN", key: "exportBin" },
+  { label: "导入BIN", key: "importBin" },
+  { type: "divider" },
+  { label: "导出Token和BIN", key: "exportWithBin" },
+  { label: "导入Token和BIN", key: "importWithBin" },
+  { type: "divider" },
   { label: "清理过期Token", key: "clean" },
   { label: "断开所有连接", key: "disconnect" },
   { label: "清除所有Token", key: "clear" },
@@ -1127,6 +1137,21 @@ const getTokenActions = (token) => {
     });
   }
 
+  // BIN/wxQrcode 类型显示导出/导入BIN选项
+  if (token.importMethod === "bin" || token.importMethod === "wxQrcode") {
+    actions.push({ type: "divider" });
+    actions.push({
+      label: "导出BIN",
+      key: "export-bin",
+      icon: () => h(NIcon, null, { default: () => h(CloudDownload) }),
+    });
+    actions.push({
+      label: "导入BIN",
+      key: "import-bin",
+      icon: () => h(NIcon, null, { default: () => h(CloudUpload) }),
+    });
+  }
+
   actions.push(
     { type: "divider" },
     {
@@ -1158,6 +1183,12 @@ const handleTokenAction = async (key, token) => {
       break;
     case "delete":
       deleteToken(token);
+      break;
+    case "export-bin":
+      exportSingleBin(token);
+      break;
+    case "import-bin":
+      importSingleBin(token);
       break;
   }
 };
@@ -1339,7 +1370,19 @@ const handleBulkAction = (key) => {
     case "export":
       exportTokens();
       break;
+    case "exportBin":
+      exportBinBulk();
+      break;
+    case "exportWithBin":
+      exportTokensWithBin();
+      break;
     case "import":
+      importTokenFile();
+      break;
+    case "importBin":
+      importBinBulk();
+      break;
+    case "importWithBin":
       importTokenFile();
       break;
     case "clean":
@@ -1354,9 +1397,9 @@ const handleBulkAction = (key) => {
   }
 };
 
-const exportTokens = () => {
+const exportTokens = async () => {
   try {
-    const data = tokenStore.exportTokens();
+    const data = await tokenStore.exportTokens();
     const dataStr = JSON.stringify(data, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
 
@@ -1371,6 +1414,23 @@ const exportTokens = () => {
   }
 };
 
+const exportTokensWithBin = async () => {
+  try {
+    const data = await tokenStore.exportTokens(true);
+    const dataStr = JSON.stringify(data, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `tokens_backup_with_bin_${new Date().toISOString().split("T")[0]}.json`;
+    link.click();
+
+    message.success("Token及BIN数据已导出");
+  } catch (error) {
+    message.error("导出失败: " + (error.message || "未知错误"));
+  }
+};
+
 const importTokenFile = () => {
   const input = document.createElement("input");
   input.type = "file";
@@ -1379,10 +1439,10 @@ const importTokenFile = () => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const data = JSON.parse(e.target.result);
-          const result = tokenStore.importTokens(data);
+          const result = await tokenStore.importTokens(data);
           if (result.success) {
             message.success(result.message);
           } else {
@@ -1394,6 +1454,122 @@ const importTokenFile = () => {
       };
       reader.readAsText(file);
     }
+  };
+  input.click();
+};
+
+const exportSingleBin = async (token) => {
+  let buffer = await getArrayBuffer(token.id);
+  if (!buffer) buffer = await getArrayBuffer(token.name);
+  if (!buffer) {
+    message.error("未找到BIN数据");
+    return;
+  }
+  const blob = new Blob([buffer], { type: "application/octet-stream" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${token.name || "token"}.bin`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  message.success("BIN数据已导出");
+};
+
+const importSingleBin = (token) => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".bin";
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      await storeArrayBuffer(token.id, buffer);
+      message.success("BIN数据已导入，刷新Token后可重新使用");
+    } catch (err) {
+      message.error("导入BIN失败: " + (err.message || "未知错误"));
+    }
+  };
+  input.click();
+};
+
+// 辅助：ArrayBuffer ↔ Base64
+const arrayBufferToBase64 = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+};
+const base64ToArrayBuffer = (base64) => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+};
+
+// 批量导出BIN（仅BIN数据）
+const exportBinBulk = async () => {
+  try {
+    const binTokens = tokenStore.gameTokens.filter(
+      (t) => t.importMethod === "bin" || t.importMethod === "wxQrcode",
+    );
+    const binBuffers = {};
+    for (const token of binTokens) {
+      let buffer = await getArrayBuffer(token.id);
+      if (!buffer) buffer = await getArrayBuffer(token.name);
+      if (buffer) binBuffers[token.id] = arrayBufferToBase64(buffer);
+    }
+    if (Object.keys(binBuffers).length === 0) {
+      message.warning("没有BIN类型Token可导出");
+      return;
+    }
+    const dataStr = JSON.stringify({ binBuffers, exportedAt: new Date().toISOString() }, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `bin_backup_${new Date().toISOString().split("T")[0]}.json`;
+    link.click();
+    message.success(`已导出 ${Object.keys(binBuffers).length} 个BIN数据`);
+  } catch (error) {
+    message.error("导出BIN失败: " + (error.message || "未知错误"));
+  }
+};
+
+// 批量导入BIN（仅BIN数据）
+const importBinBulk = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        // 兼容两种格式：{ binBuffers: {...} } 或扁平 { tokenId: base64, ... }
+        const binBuffers = data.binBuffers || data;
+        if (!binBuffers || typeof binBuffers !== "object") {
+          message.error("文件中没有BIN数据");
+          return;
+        }
+        let count = 0;
+        for (const [tokenId, base64] of Object.entries(binBuffers)) {
+          if (tokenId === "exportedAt" || tokenId === "version") continue;
+          if (typeof base64 !== "string") continue;
+          try {
+            const buffer = base64ToArrayBuffer(base64);
+            await storeArrayBuffer(tokenId, buffer);
+            count++;
+          } catch (e) {
+            console.warn(`恢复BIN数据失败 [${tokenId}]:`, e);
+          }
+        }
+        message.success(`成功导入 ${count} 个BIN数据`);
+      } catch (error) {
+        message.error("文件格式错误");
+      }
+    };
+    reader.readAsText(file);
   };
   input.click();
 };

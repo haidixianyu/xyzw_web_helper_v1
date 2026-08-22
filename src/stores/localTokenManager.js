@@ -10,6 +10,28 @@ import {
   clearGameTokens as dbClearGameTokens,
   migrateFromLocalStorageIfNeeded,
 } from "@/utils/tokenDb";
+import useIndexedDB from "@/hooks/useIndexedDB";
+
+const { getArrayBuffer, storeArrayBuffer } = useIndexedDB();
+
+// ArrayBuffer 与 Base64 互转（用于导出/导入 BIN 数据）
+const arrayBufferToBase64 = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
+
+const base64ToArrayBuffer = (base64) => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
 
 /**
  * 本地Token管理器
@@ -375,15 +397,32 @@ export const useLocalTokenStore = defineStore("localToken", () => {
   };
 
   // 批量导入/导出功能
-  const exportTokens = () => {
-    return {
+  const exportTokens = async (includeBin = false) => {
+    const result = {
       userToken: userToken.value,
       gameTokens: gameTokens.value,
       exportedAt: new Date().toISOString(),
     };
+
+    if (includeBin) {
+      const binBuffers = {};
+      for (const [roleId, tokenData] of Object.entries(gameTokens.value)) {
+        if (
+          tokenData.importMethod === "bin" ||
+          tokenData.importMethod === "wxQrcode"
+        ) {
+          let buffer = await getArrayBuffer(roleId);
+          if (!buffer && tokenData.name) buffer = await getArrayBuffer(tokenData.name);
+          if (buffer) binBuffers[roleId] = arrayBufferToBase64(buffer);
+        }
+      }
+      result.binBuffers = binBuffers;
+    }
+
+    return result;
   };
 
-  const importTokens = (tokenData) => {
+  const importTokens = async (tokenData) => {
     try {
       if (tokenData.userToken) {
         setUserToken(tokenData.userToken);
@@ -395,6 +434,23 @@ export const useLocalTokenStore = defineStore("localToken", () => {
         Object.entries(gameTokens.value).forEach(([rid, data]) => {
           dbPutGameToken(rid, { ...data, roleId: rid }).catch(() => {});
         });
+
+        // 恢复 BIN 数据到 IndexedDB
+        if (tokenData.binBuffers && typeof tokenData.binBuffers === "object") {
+          for (const [roleId, data] of Object.entries(gameTokens.value)) {
+            const base64 =
+              tokenData.binBuffers[roleId] ||
+              tokenData.binBuffers[data.name];
+            if (base64) {
+              try {
+                const buffer = base64ToArrayBuffer(base64);
+                await storeArrayBuffer(roleId, buffer);
+              } catch (e) {
+                console.warn(`恢复BIN数据失败 [${roleId}]:`, e);
+              }
+            }
+          }
+        }
       }
 
       return { success: true, message: "Token导入成功" };

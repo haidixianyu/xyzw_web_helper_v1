@@ -85,8 +85,23 @@
                 :alt="gradeLabel(c.color)"
               />
               <div class="car-info">
-                <div class="car-name">
-                  {{ c.name || c.carName || "车辆 #" + (c.id || c.key) }}
+                <div class="car-name-row">
+                  <span class="car-name">
+                    {{ c.name || c.carName || "车辆 #" + (c.id || c.key) }}
+                  </span>
+                  <n-button
+                    size="tiny"
+                    quaternary
+                    type="warning"
+                    :loading="ticketRefreshingKey === (c.id ?? c.key)"
+                    :disabled="carLoading || Number(c.sendAt || 0) !== 0"
+                    @click="refreshCarToOrange(c)"
+                  >
+                    <template #icon>
+                      <n-icon><Ticket /></n-icon>
+                    </template>
+                    车票刷新
+                  </n-button>
                 </div>
                 <div class="car-badges">
                   <n-tag size="tiny" :bordered="false" :color="{ color: getGradeColor(c.color), textColor: '#fff' }">
@@ -221,6 +236,8 @@ const carLoading = ref(false);
 const carRaw = ref(null);
 const carFetched = ref(false);
 const refreshTickets = ref(0);
+// 车票刷新：当前正在刷新的车辆标识（防止并发）
+const ticketRefreshingKey = ref(null);
 
 // 每日 20:00 后禁止发车：每分钟刷新一次
 const nowTs = ref(Date.now());
@@ -280,28 +297,15 @@ const normalizeCars = (raw) => {
 
 const carList = computed(() => {
   const list = normalizeCars(carRaw.value);
+  // 固定按车辆名称排序（无名称时用 ID 兜底），避免状态/品阶变化导致列表跳动
   return list.sort((a, b) => {
-    // 1. 状态排序：可收车 > 未发车 > 已发车(等待中)
-    const getStatusWeight = (c) => {
-      const isSent = Number(c.sendAt || 0) !== 0;
-      if (isSent) {
-        // 已发车：若可收车则最优先(2)，否则最低优先级(0)
-        return canClaim(c) ? 2 : 0;
-      }
-      // 未发车：次优先(1)
-      return 1;
-    };
-    const weightA = getStatusWeight(a);
-    const weightB = getStatusWeight(b);
-    if (weightA !== weightB) return weightB - weightA; // 降序：2 > 1 > 0
-
-    // 2. 品阶排序：高 > 低
-    const colorA = Number(a.color || 0);
-    const colorB = Number(b.color || 0);
-    if (colorA !== colorB) return colorB - colorA;
-
-    // 3. ID 排序：保持稳定
-    return String(a.id || "").localeCompare(String(b.id || ""));
+    const nameA = String(
+      a.name || a.carName || `车辆 #${a.id || a.key || ""}` || "",
+    );
+    const nameB = String(
+      b.name || b.carName || `车辆 #${b.id || b.key || ""}` || "",
+    );
+    return nameA.localeCompare(nameB, "zh-CN", { numeric: true });
   });
 });
 
@@ -684,6 +688,82 @@ const refreshCar = async (car) => {
     } catch (_) {}
   } catch (e) {
     message.error("刷新失败：" + (e.message || "未知错误"));
+  }
+};
+
+// 静默刷新单车（供“车票刷新”循环使用，避免弹窗刷屏），就地更新车辆数据与车票数量
+const silentRefreshCar = async (car) => {
+  const token = tokenStore.selectedToken;
+  const resp = await tokenStore.sendMessageWithPromise(
+    token.id,
+    "car_refresh",
+    { carId: String(car.id) },
+    10000,
+  );
+  const data = resp?.car || resp?.body?.car || resp;
+  if (data && typeof data === "object") {
+    if (data.color != null) car.color = Number(data.color);
+    if (data.rewards != null) car.rewards = data.rewards;
+    if (data.refreshCount != null) car.refreshCount = Number(data.refreshCount);
+
+    // 同步更新底层 carRaw 数据源，保持展示一致
+    const root = carRaw.value?.body || carRaw.value || {};
+    if (root.roleCar && root.roleCar.carDataMap && root.roleCar.carDataMap[car.id]) {
+      root.roleCar.carDataMap[car.id] = {
+        ...root.roleCar.carDataMap[car.id],
+        ...data,
+      };
+    }
+  }
+  // 刷新后更新车票数量
+  try {
+    const roleRes = await tokenStore.sendMessageWithPromise(
+      token.id,
+      "role_getroleinfo",
+      {},
+      8000,
+    );
+    refreshTickets.value = Number(
+      roleRes?.role?.items?.[35002]?.quantity || 0,
+    );
+  } catch (_) {}
+};
+
+// 车票刷新：有车票或免费刷新时，刷到橙色(4)或红色(5)及以上为止；无车票且无免费刷新则停止
+const refreshCarToOrange = async (car) => {
+  const token = tokenStore.selectedToken;
+  if (!token || !isConnected.value) {
+    return message.warning("请先选择 Token 并建立连接");
+  }
+  if (!car?.id) return message.warning("未找到车辆ID");
+  if (Number(car.sendAt || 0) !== 0) {
+    return message.warning("已发车车辆不可刷新");
+  }
+
+  const carKey = car.id ?? car.key;
+  ticketRefreshingKey.value = carKey;
+  try {
+    let maxAttempts = 30;
+    while (maxAttempts-- > 0) {
+      // 已刷到橙色/红色及以上，停止
+      if (Number(car.color || 0) >= 4) {
+        message.success(`已刷到 ${gradeLabel(car.color)}，停止刷新`);
+        return;
+      }
+      // 无车票且无免费刷新，停止
+      const free = Number(car.refreshCount ?? 0) === 0;
+      if (!free && Number(refreshTickets.value || 0) <= 0) {
+        message.warning("无车票且无免费刷新，停止刷新");
+        return;
+      }
+      await silentRefreshCar(car);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    message.warning("刷新次数已达上限，已停止");
+  } catch (e) {
+    message.error("车票刷新失败：" + (e.message || "未知错误"));
+  } finally {
+    ticketRefreshingKey.value = null;
   }
 };
 
@@ -1153,10 +1233,18 @@ const cancelHelper = () => {
   min-width: 0;
 }
 
+.car-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .car-name {
+  flex: 1;
+  min-width: 0;
   font-weight: bold;
   font-size: 14px;
-  margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

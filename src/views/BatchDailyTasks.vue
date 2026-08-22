@@ -107,7 +107,7 @@
         </div>
 
         <!-- Token Selection -->
-        <n-card class="token-list-card">
+        <n-card class="token-list-card" style="padding: 8px 12px;">
           <template #header>
             <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
               <div style="display: flex; align-items: center; gap: 2px;">
@@ -138,42 +138,42 @@
                 </n-tag>
               </div>
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <n-tooltip placement="bottom">
+                <n-tooltip placement="bottom" style="display: inline-flex;">
                   <template #trigger>
                     <n-button
                       size="small"
                       type="info"
                       ghost
                       :loading="carOverviewLoading"
-                      :disabled="carOverviewLoading || isRunning"
+                      :disabled="carOverviewLoading || isRunning || selectedTokens.length === 0"
                       @click="fetchCarOverview"
                     >
-                      <template #icon>
-                        <n-icon>
+                      发车信息
+                      <template #icon v-if="carOverviewLoading">
+                        <n-icon style="margin-left: 4px;">
                           <Refresh />
                         </n-icon>
                       </template>
-                      发车信息
                     </n-button>
                   </template>
                   查询发车状态，标签格式：未发车数/待收车数
                 </n-tooltip>
-                <n-tooltip placement="bottom">
+                <n-tooltip placement="bottom" style="display: inline-flex;">
                   <template #trigger>
                     <n-button
                       size="small"
                       type="success"
                       ghost
                       :loading="towerOverviewLoading"
-                      :disabled="towerOverviewLoading || isRunning"
+                      :disabled="towerOverviewLoading || isRunning || selectedTokens.length === 0"
                       @click="fetchTowerOverview"
                     >
-                      <template #icon>
-                        <n-icon>
+                      闯关信息
+                      <template #icon v-if="towerOverviewLoading">
+                        <n-icon style="margin-left: 4px;">
                           <Refresh />
                         </n-icon>
                       </template>
-                      闯关
                     </n-button>
                   </template>
                   查询换皮闯关进度，标签格式：已通关数/8
@@ -183,15 +183,60 @@
                   type="primary"
                   ghost
                   :loading="isRefreshingPower"
-                  :disabled="isRefreshingPower || isRunning"
+                  :disabled="isRefreshingPower || isRunning || selectedTokens.length === 0"
                   @click="refreshTokenPower"
                 >
-                  <template #icon>
-                    <n-icon>
+                  战力信息
+                  <template #icon v-if="isRefreshingPower">
+                    <n-icon style="margin-left: 4px;">
                       <Refresh />
                     </n-icon>
                   </template>
-                  刷新战力
+                </n-button>
+                <n-button
+                  size="small"
+                  type="info"
+                  ghost
+                  :loading="shidianInfoLoading"
+                  :disabled="shidianInfoLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchShidianOverview"
+                >
+                  十殿信息
+                  <template #icon v-if="shidianInfoLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
+                  type="default"
+                  ghost
+                  :loading="consumptionInfoLoading"
+                  :disabled="consumptionInfoLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchConsumptionInfo"
+                >
+                  消耗信息
+                  <template #icon v-if="consumptionInfoLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
+                  type="warning"
+                  ghost
+                  :loading="fullInfoLoading"
+                  :disabled="fullInfoLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchFullInfo"
+                >
+                  完整信息
+                  <template #icon v-if="fullInfoLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
                 </n-button>
               </div>
             </div>
@@ -444,86 +489,107 @@
           </n-alert>
           <n-tabs type="line" animated>
             <n-tab-pane name="quickDaily" tab="每日">
-              <n-space align="center">
-                <n-button
-                  size="small"
-                  @click="claimHangUpRewards"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  领取挂机
-                </n-button>
-                <span style="font-size: 12px; color: #666; margin-left: 4px;">加钟次数</span>
-                <n-input-number
-                  v-model:value="hangUpAddTimes"
-                  size="small"
-                  :min="0"
-                  :max="10"
-                  :step="1"
-                  style="width: 90px; margin-left: 4px;"
-                />
-                <n-button
-                  size="small"
-                  @click="batchAddHangUpTime"
-                  :disabled="isRunning || selectedTokens.length === 0 || hangUpAddTimes === 0"
-                >
-                  一键加钟
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="resetBottles"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  重置罐子
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="skinChallenge"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  换皮闯关
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="claimSkinChallengeRewards"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  领取闯关奖励
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchLegacyClaim"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  功法券领取
-                </n-button>
-                <n-popselect
-                  :value="footballPick"
-                  :options="footballPickOptions"
-                  trigger="click"
-                  @update:value="onFootballPickChange"
-                >
+              <n-space vertical>
+                <!-- 挂机 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">挂机</span>
+                  <n-button
+                    size="small"
+                    @click="claimHangUpRewards"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    领取挂机
+                  </n-button>
+                  <span class="batch-inline-label">加钟次数</span>
+                  <n-input-number
+                    v-model:value="hangUpAddTimes"
+                    size="small"
+                    :min="0"
+                    :max="10"
+                    :step="1"
+                    class="batch-count-input"
+                  />
+                  <n-button
+                    size="small"
+                    @click="batchAddHangUpTime"
+                    :disabled="isRunning || selectedTokens.length === 0 || hangUpAddTimes === 0"
+                  >
+                    一键加钟
+                  </n-button>
+                </n-space>
+
+                <!-- 罐子与闯关 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">罐子·闯关</span>
+                  <n-button
+                    size="small"
+                    @click="resetBottles"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    重置罐子
+                  </n-button>
+                  <n-button
+                    size="small"
+                    @click="skinChallenge"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    换皮闯关
+                  </n-button>
+                  <n-button
+                    size="small"
+                    @click="claimSkinChallengeRewards"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    领取闯关奖励
+                  </n-button>
+                  <n-button
+                    size="small"
+                    @click="batchLegacyClaim"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    功法券领取
+                  </n-button>
+                </n-space>
+
+                <!-- 竞猜与十殿 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">竞猜·十殿</span>
+                  <n-popselect
+                    :value="footballPick"
+                    :options="footballPickOptions"
+                    trigger="click"
+                    @update:value="onFootballPickChange"
+                  >
+                    <n-button
+                      size="small"
+                      :disabled="isRunning || selectedTokens.length === 0"
+                    >
+                      一键竞猜({{ footballPickLabel }})
+                    </n-button>
+                  </n-popselect>
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchApexGuess(apexScheduleId)"
                   >
-                    一键竞猜({{ footballPickLabel }})
+                    逐鹿盐山竞猜
                   </n-button>
-                </n-popselect>
-                <n-input-number
-                  v-model:value="apexScheduleId"
-                  size="small"
-                  :min="1"
-                  :max="999"
-                  :step="1"
-                  style="width: 90px;"
-                />
-                <n-button
-                  size="small"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  @click="batchApexGuess(apexScheduleId)"
-                >
-                  逐鹿盐山竞猜
-                </n-button>
+                  <n-input-number
+                    v-model:value="apexScheduleId"
+                    size="small"
+                    :min="1"
+                    :max="999"
+                    :step="1"
+                    class="batch-count-input"
+                  />
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchShidianReward"
+                  >
+                    十殿转盘
+                  </n-button>
+                </n-space>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="quickMon" tab="周一">
@@ -549,11 +615,7 @@
                 <n-button
                   size="small"
                   @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
+                  :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键收车
                 </n-button>
@@ -589,11 +651,7 @@
                 <n-button
                   size="small"
                   @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
+                  :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键收车
                 </n-button>
@@ -622,11 +680,7 @@
                 <n-button
                   size="small"
                   @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
+                  :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键收车
                 </n-button>
@@ -658,8 +712,68 @@
                 </n-button>
               </n-space>
             </n-tab-pane>
+            <n-tab-pane name="weirdTower" tab="怪异塔">
+              <n-space>
+                <n-input-number
+                  v-model:value="weirdTowerMaxClimb"
+                  class="weird-tower-count-input"
+                  size="small"
+                  :min="1"
+                  :precision="0"
+                  :show-button="false"
+                  placeholder="次数"
+                  :disabled="isRunning"
+                />
+                <span class="weird-tower-count-unit">次</span>
+                <n-button
+                  size="small"
+                  @click="climbWeirdTower"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isWeirdTowerActivityOpen
+                  "
+                >
+                  一键爬怪异塔
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchUseItems"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isWeirdTowerActivityOpen
+                  "
+                >
+                  一键使用怪异塔道具
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchMergeItems"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isWeirdTowerActivityOpen
+                  "
+                >
+                  一键怪异塔合成
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchClaimFreeEnergy"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isWeirdTowerActivityOpen
+                  "
+                >
+                  一键领取怪异塔免费道具
+                </n-button>
+              </n-space>
+            </n-tab-pane>
             <n-tab-pane name="daily" tab="日常">
               <n-space>
+                <!-- 领取挂机
                 <n-button
                   size="small"
                   @click="claimHangUpRewards"
@@ -667,6 +781,7 @@
                 >
                   领取挂机
                 </n-button>
+                一键加钟
                 <n-button
                   size="small"
                   @click="batchAddHangUpTime"
@@ -674,6 +789,8 @@
                 >
                   一键加钟
                 </n-button>
+                -->
+
                 <n-button
                   size="small"
                   @click="batchFightBoss"
@@ -681,6 +798,7 @@
                 >
                   一键打BOSS
                 </n-button>
+                <!-- 重置罐子
                 <n-button
                   size="small"
                   @click="resetBottles"
@@ -688,6 +806,7 @@
                 >
                   重置罐子
                 </n-button>
+                一键领取罐子
                 <n-button
                   size="small"
                   @click="batchlingguanzi"
@@ -695,6 +814,7 @@
                 >
                   一键领取罐子
                 </n-button>
+                -->
                 <n-button
                   size="small"
                   @click="batchclubsign"
@@ -702,6 +822,7 @@
                 >
                   一键俱乐部签到
                 </n-button>
+                <!-- 一键答题
                 <n-button
                   size="small"
                   @click="batchStudy"
@@ -709,6 +830,7 @@
                 >
                   一键答题
                 </n-button>
+                -->
                 <n-button
                   size="small"
                   @click="batcharenafight"
@@ -720,6 +842,7 @@
                 >
                   一键竞技场战斗3次
                 </n-button>
+                <!-- 智能发车 一键收车
                 <n-button
                   size="small"
                   @click="batchSmartSendCar"
@@ -734,14 +857,11 @@
                 <n-button
                   size="small"
                   @click="batchClaimCars"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
+                  :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键收车
                 </n-button>
+                -->
                 <n-button
                   size="small"
                   @click="store_purchase"
@@ -825,6 +945,7 @@
                 </n-popselect>
               </n-space>
             </n-tab-pane>
+            <!-- 宝库 tab
             <n-tab-pane name="baoku" tab="宝库">
               <n-space>
                 <n-button
@@ -851,65 +972,7 @@
                 </n-button>
               </n-space>
             </n-tab-pane>
-            <n-tab-pane name="weirdTower" tab="怪异塔">
-              <n-space>
-                <n-input-number
-                  v-model:value="weirdTowerMaxClimb"
-                  class="weird-tower-count-input"
-                  size="small"
-                  :min="1"
-                  :precision="0"
-                  :show-button="false"
-                  placeholder="次数"
-                  :disabled="isRunning"
-                />
-                <span class="weird-tower-count-unit">次</span>
-                <n-button
-                  size="small"
-                  @click="climbWeirdTower"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键爬怪异塔
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchUseItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键使用怪异塔道具
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchMergeItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键怪异塔合成
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimFreeEnergy"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键领取怪异塔免费道具
-                </n-button>
-              </n-space>
-            </n-tab-pane>
+            -->
             <n-tab-pane name="resource" tab="资源">
               <n-space>
                 <n-button
@@ -2561,6 +2624,35 @@
               </div>
             </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
+              >指定护卫设置</n-divider
+            >
+            <div class="settings-grid">
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: column;
+                  align-items: stretch;
+                  gap: 8px;
+                "
+              >
+                <label class="setting-label"
+                  >指定护卫（从账号列表多选）</label
+                >
+                <n-select
+                  v-model:value="batchSettings.designatedGuards"
+                  :options="designatedGuardOptions"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="选择一个或多个账号作为指定护卫"
+                  size="small"
+                />
+                <span class="setting-hint"
+                  >批量智能发车时，优先从同俱乐部且已指定的人员中选择护卫；若该俱乐部无指定人员，则按红数最多的人选择。留空则不限制。</span
+                >
+              </div>
+            </div>
+            <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >功法赠送设置</n-divider
             >
             <div class="settings-grid">
@@ -3290,6 +3382,7 @@ import {
   createTasksLegacy,
   createTasksFootball,
   createTasksApex,
+  createTasksShidian,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -3646,6 +3739,190 @@ const carOverviewLoading = ref(false);
 // 换皮闯关信息
 const towerOverview = ref({}); // { [tokenId]: { cleared, total } }
 const towerOverviewLoading = ref(false);
+
+// 完整信息
+const fullInfoLoading = ref(false);
+
+// 十殿信息
+const shidianInfoLoading = ref(false);
+
+// 解析十殿周奖励日期键 (YYYYMMDD)
+const parseDateString = (s) => {
+  if (!s || s.length < 8) return null;
+  return new Date(
+    parseInt(s.substring(0, 4)),
+    parseInt(s.substring(4, 6)) - 1,
+    parseInt(s.substring(6, 8)),
+  );
+};
+
+// 是否同一周（周一为一周开始）
+const isSameWeek = (a, b) => {
+  if (!a || !b) return false;
+  const startOfWeek = (d) => {
+    const c = new Date(d);
+    const day = (c.getDay() + 6) % 7;
+    c.setDate(c.getDate() - day);
+    c.setHours(0, 0, 0, 0);
+    return c;
+  };
+  return startOfWeek(a).getTime() === startOfWeek(b).getTime();
+};
+
+// 查询选中账号本周十殿层数并写入日志
+const fetchShidianOverview = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0
+      ? [...selectedTokens.value]
+      : tokens.value.map((t) => t.id);
+  if (targetIds.length === 0) {
+    message.warning("没有可查询的账号");
+    return;
+  }
+  shidianInfoLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询十殿信息(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const roleId = roleInfo?.role?.roleId
+          ? String(roleInfo.role.roleId)
+          : tokenId;
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "nightmare_getroleinfo",
+          { roleId: parseInt(roleId) },
+          8000,
+        );
+        const nm = res?.nightMareData || res?.nightmareData || {};
+        const weekAward = nm.weekAward || res?.weekAward;
+        // 仅统计属于本周的周奖励数据（与 ShiDianCard 一致），跨周数据清零
+        let finalLevel = 0;
+        if (weekAward && typeof weekAward === "object") {
+          for (const key of Object.keys(weekAward).sort().reverse()) {
+            const date = parseDateString(key);
+            if (date && isSameWeek(new Date(), date)) {
+              finalLevel = Number(weekAward[key]?.maxLevel) || 0;
+              break;
+            }
+          }
+        }
+        const currentLevel = Number(res?.nightmare?.level) || 0;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 十殿信息：本周已打到 ${finalLevel} 层（当前殿级 ${currentLevel}）`,
+          type: "success",
+        });
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 查询十殿信息失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    shidianInfoLoading.value = false;
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 十殿信息查询完成 ===`,
+      type: "info",
+    });
+  }
+};
+
+// 消耗信息
+const consumptionInfoLoading = ref(false);
+
+// 在对象中递归查找名为 key 的属性值（兼容该字段位于响应不同层级的情况）
+const deepFindKey = (obj, key, depth = 0) => {
+  if (!obj || typeof obj !== "object" || depth > 6) return undefined;
+  if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === "object") {
+      const r = deepFindKey(v, key, depth + 1);
+      if (r !== undefined) return r;
+    }
+  }
+  return undefined;
+};
+
+// 查询选中账号的消耗活动进度并写入日志（读取 activity_get 的 commonActivityInfo）
+const fetchConsumptionInfo = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0
+      ? [...selectedTokens.value]
+      : tokens.value.map((t) => t.id);
+  if (targetIds.length === 0) {
+    message.warning("没有可查询的账号");
+    return;
+  }
+  consumptionInfoLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询消耗信息(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        // 拉取角色信息：金砖数 + 黑市周本周消耗金砖
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const diamond = roleInfo?.role?.diamond ?? 0;
+        // role 下字面键 "wa:diamond"：黑市周本周消耗的金砖（递归查找，兼容不同层级）
+        const weekDiamond = Number(deepFindKey(roleInfo, "wa:diamond")) || 0;
+        // 档位信息
+        const tiers = [1000, 5000, 10000, 15000, 20000, 35000, 50000, 75000, 100000];
+        let reached = 0;
+        for (const t of tiers) {
+          if (weekDiamond >= t) reached = t;
+          else break;
+        }
+        const currentTier = reached ? `￥${reached}` : "未达到最低档";
+        const nextTierObj = tiers.find((t) => t > weekDiamond);
+        const nextInfo = nextTierObj
+          ? `${nextTierObj}（差 ${Math.max(0, nextTierObj - weekDiamond)}）`
+          : "已满档";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 消耗信息：本周金砖消耗(黑市达标)${weekDiamond}，当前达到档位：${currentTier}，下一档：${nextInfo}，当前金砖(库存)${diamond}`,
+          type: "success",
+        });
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 查询消耗信息失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    consumptionInfoLoading.value = false;
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 消耗信息查询完成 ===`,
+      type: "info",
+    });
+  }
+};
 
 // =====================
 // 领取挂机：加钟次数（默认2，0=仅领取不加钟）
@@ -4055,7 +4332,18 @@ const batchSettings = reactive({
   smartDepartureJadeThreshold: 0,
   smartDepartureTicketThreshold: 0,
   smartDepartureMatchAll: false,
+  // 指定护卫：成员ID或名称列表（批量智能发车优先从同俱乐部指定人员中选择护卫）
+  designatedGuards: [],
 });
+
+// 指定护卫：从账号列表多选（存账号名称），批量智能发车优先从同俱乐部指定人员中选择护卫
+const designatedGuardOptions = computed(() =>
+  [...gameTokens.value]
+    .map((t) => ({
+      label: t.name ? `${t.name}${t.server ? ` (${t.server})` : ""}` : t.id,
+      value: t.name || t.id,
+    })),
+);
 
 // 移动端检测：iOS/Android 等小屏设备自动切换为单列布局
 const isMobile = ref(false);
@@ -4587,6 +4875,7 @@ const exportConfig = () => {
         smartDepartureTicketThreshold:
           batchSettings.smartDepartureTicketThreshold,
         smartDepartureMatchAll: batchSettings.smartDepartureMatchAll,
+        designatedGuards: batchSettings.designatedGuards || [],
       },
       tokenSettings: tokenSettings,
     };
@@ -5204,7 +5493,7 @@ const executeScheduledTask = async (task) => {
       }
 
       if (
-        ["batchSmartSendCar", "batchClaimCars"].includes(taskName) &&
+        ["batchSmartSendCar"].includes(taskName) &&
         !isCarActivityOpen.value
       ) {
         addLog({
@@ -6352,9 +6641,18 @@ const waitForConnection = async (
   timeout = batchSettings.connectionTimeout,
 ) => {
   const start = Date.now();
+  let sawConnecting = false;
   while (Date.now() - start < timeout) {
     const status = tokenStore.getWebSocketStatus(tokenId);
     if (status === "connected") return true;
+    // 记录是否进入过连接中状态
+    if (status === "connecting") sawConnecting = true;
+    // 仅当"确认进入过 connecting 后又失败"才提前返回（缩短阻塞）。
+    // 初始状态(connecting/disconnected都还没真正建连)不做提前返回，
+    // 否则会误把初始 disconnected 当成失败导致瞬间超时。
+    if (sawConnecting && (status === "error" || status === "disconnected")) {
+      return false;
+    }
     await workerSleep(500);
   }
   return false;
@@ -6374,6 +6672,25 @@ const releaseConnectionSlot = () => {
   if (connectionQueue.active > 0) {
     connectionQueue.active--;
   }
+};
+
+const formatConnectionFailure = (tokenId, info) => {
+  const parts = [`状态: ${info?.status || "未知"}`];
+  if (info?.crossTab) {
+    const time = info.crossTab.timestamp
+      ? new Date(info.crossTab.timestamp).toLocaleTimeString()
+      : "";
+    parts.push(`其他标签页已连接${time ? ` (${time})` : ""}`);
+  }
+  if (info?.lock) parts.push("连接锁被占用");
+  if (info?.lastError) {
+    const err =
+      typeof info.lastError === "string"
+        ? info.lastError
+        : info.lastError.error || JSON.stringify(info.lastError);
+    parts.push(`最后错误: ${err}`);
+  }
+  return parts.join("，");
 };
 
 const ensureConnection = async (tokenId, maxRetries = 2) => {
@@ -6403,22 +6720,56 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     connected = await waitForConnection(tokenId);
 
     if (!connected && maxRetries > 0) {
+      const info = tokenStore.getConnectionInfo?.(tokenId);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `连接超时，尝试重连...`,
+        message: `连接超时，尝试重连... (${formatConnectionFailure(tokenId, info)})`,
         type: "warning",
       });
 
       tokenStore.closeWebSocketConnection(tokenId);
       await workerSleep(batchSettings.reconnectDelay);
 
+      // 清除残留的连接锁：若上次连接卡在 connecting 超时，其 connect 锁可能一直未释放，
+      // 否则下面的 createWebSocketConnection 会再被锁阻塞10秒导致“连接锁被占用”
+      tokenStore.releaseConnectionLock(tokenId, "connect");
+
+      // 主动触发一次Token刷新（在批量页 attemptTokenRefresh 仅刷新token值、不会自动重连，
+      // bin/wxQrcode 重读IndexedDB里的BIN重新变换，url 重新fetch，manual无来源则刷新失败）
+      let activeRefreshOk = false;
+      try {
+        activeRefreshOk =
+          (await tokenStore.attemptTokenRefresh(tokenId, false, true)) === true;
+      } catch (refreshErr) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `主动刷新Token异常: ${refreshErr?.message || refreshErr}`,
+          type: "warning",
+        });
+      }
+
+      // 等待自动刷新完成（最多等 3 秒），避免竞态
+      const oldToken = tokens.value.find((t) => t.id === tokenId)?.token;
+      // 主动刷新已成功则视为 Token 已刷新
+      let tokenChanged = activeRefreshOk;
+      const refreshWaitStart = Date.now();
+      while (Date.now() - refreshWaitStart < 3000) {
+        await workerSleep(200);
+        const current = tokens.value.find((t) => t.id === tokenId);
+        if (current && current.token !== oldToken) {
+          tokenChanged = true;
+          break;
+        }
+      }
+
+      const currentToken = tokens.value.find((t) => t.id === tokenId);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `正在重连...`,
+        message: `正在重连...${tokenChanged ? " (Token已刷新)" : ` (Token未变化, 最后刷新: ${currentToken?.lastRefreshed ? new Date(currentToken.lastRefreshed).toLocaleTimeString() : '无'})`}`,
         type: "info",
       });
 
-      const refreshedToken = tokens.value.find((t) => t.id === tokenId);
+      const refreshedToken = currentToken || tokens.value.find((t) => t.id === tokenId);
       tokenStore.createWebSocketConnection(
         tokenId,
         refreshedToken.token,
@@ -6431,7 +6782,14 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     if (!connected) {
       // 连接失败，释放槽位
       releaseConnectionSlot();
-      throw new Error("连接失败 (重试后仍超时)");
+      const info = tokenStore.getConnectionInfo?.(tokenId);
+      const reason = formatConnectionFailure(tokenId, info);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `连接失败: ${reason}`,
+        type: "error",
+      });
+      throw new Error(`连接失败 (${reason})`);
     }
   }
 
@@ -6466,6 +6824,35 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
   }
 
   return true;
+};
+
+// ===== 临时: 模拟 token 过期，用于本地验证重连/刷新修复 =====
+// 用法: window.__simulateTokenExpired('账号id')
+// 会断开并篡改该账号的token为无效值, 模拟服务器判定过期。
+// 之后运行任一批量任务(如重置罐子), 应看到:
+//   连接超时 -> 正在重连...(Token已刷新) -> 成功
+// 验证完可删除本函数。
+window.__simulateTokenExpired = function (tokenId) {
+  const t = tokens.value.find((x) => x.id === tokenId);
+  if (!t) {
+    message.error(`未找到账号: ${tokenId}`);
+    return;
+  }
+  // 断开当前连接(模拟服务端因过期掉线)
+  if (tokenStore.getWebSocketStatus(tokenId) === "connected") {
+    tokenStore.closeWebSocketConnection(tokenId);
+  }
+  // 篡改token为无效值, 使下次连接握手必被判定 token expired
+  tokenStore.updateToken(tokenId, {
+    token: `EXPIRED_SIM_${Date.now()}`,
+    lastRefreshed: Date.now(),
+  });
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `[模拟] 已将 ${t.name} 的token篡改为无效值, 下一次批量任务将触发过期+重连自愈`,
+    type: "warning",
+  });
+  message.warning(`已模拟 ${t.name} 的 token 过期`);
 };
 
 // 查询发车信息概览（未发车/已发车/可收车）
@@ -6627,6 +7014,57 @@ const fetchTowerOverview = async () => {
   message.success(`闯关信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
 };
 
+// 查询完整角色信息
+const fetchFullInfo = async () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择要查询的账号");
+    return;
+  }
+
+  const targetIds = [...selectedTokens.value];
+  fullInfoLoading.value = true;
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const tokenId of targetIds) {
+    if (shouldStop.value) break;
+    const token = tokens.value.find((t) => t.id === tokenId);
+    if (!token) {
+      failCount++;
+      continue;
+    }
+    try {
+      await ensureConnection(tokenId);
+      const roleInfoResp = await tokenStore.sendGetRoleInfo(tokenId);
+      // 自动缓存战斗力
+      const roleData = roleInfoResp?.role || {};
+      if (roleData.power) updateTokenPower(tokenId, roleData.power);
+
+      // 将完整响应体转为 JSON 输出
+      const fullJson = JSON.stringify(roleInfoResp, null, 2);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【完整信息】${token.name}\n${fullJson}`,
+        type: "info",
+      });
+      successCount++;
+    } catch (e) {
+      failCount++;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 查询完整信息失败: ${e.message}`,
+        type: "warning",
+      });
+    } finally {
+      tokenStore.closeWebSocketConnection(tokenId);
+      releaseConnectionSlot();
+    }
+  }
+
+  fullInfoLoading.value = false;
+  message.success(`完整信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
+};
+
 const createTaskDeps = () => ({
   selectedTokens,
   tokens,
@@ -6743,6 +7181,9 @@ const { batchFootballBet } = tasksFootball;
 
 const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess } = tasksApex;
+
+const tasksShidian = createTasksShidian(createTaskDeps());
+const { batchShidianReward } = tasksShidian;
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);
@@ -7299,6 +7740,12 @@ const stopBatch = () => {
   color: #666;
 }
 
+.setting-hint {
+  font-size: 12px;
+  color: #999;
+  line-height: 1.5;
+}
+
 .setting-switches {
   display: flex;
   flex-direction: column;
@@ -7325,6 +7772,28 @@ const stopBatch = () => {
 .weird-tower-count-input {
   width: 86px;
   flex-shrink: 0;
+}
+
+/* 每日分组排版 */
+.batch-group-label {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--n-color-info, #2080f0);
+  background: var(--n-color, rgba(32, 128, 240, 0.1));
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.batch-inline-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.batch-count-input {
+  width: 90px !important;
 }
 
 .weird-tower-count-unit {

@@ -103,6 +103,8 @@ export function createTasksCar(deps) {
         // 2.5 Fetch Helper Data (Club Members & Usage)
         let helperUsageMap = {};
         let sortedHelpers = [];
+        // 最终护卫池：优先为同俱乐部且已指定的人员，无指定则退回按红数最多的全员
+        let guardPool = [];
 
         // 封装获取护卫使用情况的方法
         const updateHelperUsage = async () => {
@@ -148,10 +150,23 @@ export function createTasksCar(deps) {
               redQuench: m.custom?.red_quench_cnt || 0,
             }))
             .sort((a, b) => b.redQuench - a.redQuench);
-            
+
+          // 指定护卫：在同俱乐部且已指定的人员范围内选择；该俱乐部无指定人员则按红数最多的人
+          const designatedGuards = (batchSettings.designatedGuards || [])
+            .map((s) => String(s).trim())
+            .filter(Boolean);
+          const designatedMembers = sortedHelpers.filter((h) =>
+            designatedGuards.some((g) => g === h.id || g === h.name),
+          );
+          guardPool = designatedMembers.length
+            ? designatedMembers
+            : sortedHelpers;
+
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 获取到 ${sortedHelpers.length} 位潜在护卫`,
+            message: designatedMembers.length
+              ? `${token.name} 指定护卫 ${designatedMembers.length} 位（同俱乐部），优先选用`
+              : `${token.name} 无指定护卫或均不在该俱乐部，按红数最多的人选择（${sortedHelpers.length} 位潜在护卫）`,
             type: "info",
           });
         } catch (e) {
@@ -163,28 +178,30 @@ export function createTasksCar(deps) {
           });
         }
 
-        // Helper function to assign guard
+        // Helper function to assign guard.
+        // 返回 true = 可以发车（无需护卫 / 已分配护卫 / 已有护卫）；
+        // 返回 false = 需要护卫但无可用指定护卫，须停止发车
         const assignHelperIfNeeded = async (car) => {
           const color = Number(car.color || 0);
           // Only Red(5) and above need guards
-          if (color < 5) return;
+          if (color < 5) return true;
           // Skip if already has helper
-          if (car.helperId) return;
+          if (car.helperId) return true;
 
           // 每次分配前刷新护卫状态，避免并发导致的使用次数超标
           await updateHelperUsage();
 
-          if (!sortedHelpers.length) {
+          if (!guardPool.length) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫，但未获取到可用护卫列表`,
+              message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫，但未获取到可用护卫列表，停止发车`,
               type: "warning",
             });
-            return;
+            return false;
           }
 
           // Find best available helper
-          const bestHelper = sortedHelpers.find((h) => {
+          const bestHelper = guardPool.find((h) => {
             const used = Number(helperUsageMap[h.id] || 0);
             return used < 4;
           });
@@ -198,18 +215,22 @@ export function createTasksCar(deps) {
               message: `${token.name} 车辆[${gradeLabel(car.color)}]自动分配护卫: ${bestHelper.name} (已助战: ${helperUsageMap[bestHelper.id]}/4)`,
               type: "success",
             });
-          } else {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫，但所有护卫次数已满`,
-              type: "warning",
-            });
+            return true;
           }
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫，但所有指定护卫次数已满，停止发车`,
+            type: "warning",
+          });
+          return false;
         };
 
         // 3. Process Cars
+        // 账号级守卫耗尽标志：一旦指定护卫已满，终止该账号整个智能发车
+        let guardExhausted = false;
         for (const car of carList) {
-          if (shouldStop.value) break;
+          if (shouldStop.value || guardExhausted) break;
 
           if (Number(car.sendAt || 0) !== 0) continue;
 
@@ -225,7 +246,16 @@ export function createTasksCar(deps) {
             };
 
             if (shouldSendCar(car, effectiveTickets, batchSettings.carMinColor, customConditions, batchSettings.useGoldRefreshFallback, batchSettings.smartDepartureMatchAll)) {
-              await assignHelperIfNeeded(car);
+              const canSend = await assignHelperIfNeeded(car);
+              if (!canSend) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 车辆[${gradeLabel(car.color)}]满足条件，但无可用指定护卫，终止该账号智能发车`,
+                  type: "warning",
+                });
+                guardExhausted = true;
+                break;
+              }
               addLog({
                 time: new Date().toLocaleTimeString(),
                 message: `${token.name} 车辆[${gradeLabel(car.color)}]满足条件，直接发车`,
@@ -262,7 +292,16 @@ export function createTasksCar(deps) {
               });
             }
             else {
-              await assignHelperIfNeeded(car);
+              const canSend = await assignHelperIfNeeded(car);
+              if (!canSend) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫但无可用指定护卫，终止该账号智能发车`,
+                  type: "warning",
+                });
+                guardExhausted = true;
+                break;
+              }
               addLog({
                 time: new Date().toLocaleTimeString(),
                 message: `${token.name} 车辆[${gradeLabel(car.color)}]不满足条件且无刷新次数，直接发车`,
@@ -317,7 +356,16 @@ export function createTasksCar(deps) {
               } catch (_) {}
 
               if (shouldSendCar(car, batchSettings.useGoldRefreshFallback ? 999 : refreshTickets, batchSettings.carMinColor, customConditions, batchSettings.useGoldRefreshFallback, batchSettings.smartDepartureMatchAll)) {
-                await assignHelperIfNeeded(car);
+                const canSend = await assignHelperIfNeeded(car);
+                if (!canSend) {
+                  addLog({
+                    time: new Date().toLocaleTimeString(),
+                    message: `${token.name} 刷新后车辆[${gradeLabel(car.color)}]满足条件，但无可用指定护卫，终止该账号智能发车`,
+                    type: "warning",
+                  });
+                  guardExhausted = true;
+                  break;
+                }
                 addLog({
                   time: new Date().toLocaleTimeString(),
                   message: `${token.name} 刷新后车辆[${gradeLabel(car.color)}]满足条件，发车`,
@@ -352,7 +400,16 @@ export function createTasksCar(deps) {
                 });
               }
               else {
-                assignHelperIfNeeded(car);
+                const canSend = await assignHelperIfNeeded(car);
+                if (!canSend) {
+                  addLog({
+                    time: new Date().toLocaleTimeString(),
+                    message: `${token.name} 刷新后车辆[${gradeLabel(car.color)}]需要护卫但无可用指定护卫，终止该账号智能发车`,
+                    type: "warning",
+                  });
+                  guardExhausted = true;
+                  break;
+                }
                 addLog({
                   time: new Date().toLocaleTimeString(),
                   message: `${token.name} 刷新后车辆[${gradeLabel(car.color)}]仍不满足条件且无刷新次数，发车`,

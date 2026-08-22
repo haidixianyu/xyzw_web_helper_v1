@@ -311,6 +311,12 @@ export function registerDefaultCommands(reg) {
 
     // 梦魇相关
     .register("nightmare_getroleinfo")
+    .register("nightmare_claimturnrewardtimes")
+    .register("nightmare_claimbook")
+    .register("nightmare_claimweekreward")
+    .register("nightmare_clickturntable")
+    .register("nightmare_setfighter")
+    .register("nightmare_dismiss")
     .register("dungeon_selecthero")
     .register("bosstower_gethelprank")
     .register("dungeon_buymerchant")
@@ -379,6 +385,10 @@ export function registerDefaultCommands(reg) {
 
     // 咸王宝库
     .register("matchteam_getroleteaminfo")
+    .register("matchteam_create")
+    .register("matchteam_join")
+    .register("matchteam_memberprepare")
+    .register("matchteam_openteam")
     .register("bosstower_getinfo")
     .register("bosstower_startboss")
     .register("bosstower_startbox")

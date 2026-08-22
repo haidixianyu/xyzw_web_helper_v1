@@ -336,11 +336,12 @@ export const useTokenStore = defineStore("tokens", () => {
   const attemptTokenRefresh = async (
     tokenId: string,
     forceReconnect = false,
+    bypassCooldown = false,
   ) => {
     // 检查冷却时间 (10秒)
     const lastAttempt = tokenRefreshAttempts.value[tokenId] || 0;
     const now = Date.now();
-    if (now - lastAttempt < 10000) {
+    if (!bypassCooldown && now - lastAttempt < 10000) {
       wsLogger.warn(`Token刷新过于频繁，跳过 [${tokenId}]`);
       return false;
     }
@@ -928,6 +929,19 @@ export const useTokenStore = defineStore("tokens", () => {
     return wsConnections.value[tokenId]?.status || "disconnected";
   };
 
+  /**
+   * 获取连接诊断信息（用于日志展示失败原因）
+   */
+  const getConnectionInfo = (tokenId: string) => {
+    const conn = wsConnections.value[tokenId];
+    return {
+      status: conn?.status || "disconnected",
+      lastError: conn?.lastError || null,
+      crossTab: checkCrossTabConnection(tokenId),
+      lock: !!connectionLocks.value[`${tokenId}_connect`],
+    };
+  };
+
   // 获取WebSocket客户端
   const getWebSocketClient = (tokenId: string) => {
     return wsConnections.value[tokenId]?.client || null;
@@ -1180,19 +1194,67 @@ export const useTokenStore = defineStore("tokens", () => {
     }
   };
 
+  // ArrayBuffer 与 Base64 互转（用于导出/导入 BIN 数据）
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  };
+
+  const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  };
+
   // 工具方法
-  const exportTokens = () => {
-    return {
+  const exportTokens = async (includeBin = false) => {
+    const result: any = {
       tokens: gameTokens.value,
       exportedAt: new Date().toISOString(),
       version: "2.0",
     };
+
+    if (includeBin) {
+      const binBuffers: Record<string, string> = {};
+      for (const token of gameTokens.value) {
+        if (token.importMethod === "bin" || token.importMethod === "wxQrcode") {
+          let buffer = await getArrayBuffer(token.id);
+          if (!buffer) buffer = await getArrayBuffer(token.name);
+          if (buffer) binBuffers[token.id] = arrayBufferToBase64(buffer);
+        }
+      }
+      result.binBuffers = binBuffers;
+    }
+
+    return result;
   };
 
-  const importTokens = (data: any) => {
+  const importTokens = async (data: any) => {
     try {
       if (data.tokens && Array.isArray(data.tokens)) {
         gameTokens.value = data.tokens;
+
+        if (data.binBuffers && typeof data.binBuffers === "object") {
+          for (const token of data.tokens) {
+            const base64 = data.binBuffers[token.id] || data.binBuffers[token.name];
+            if (base64) {
+              try {
+                const buffer = base64ToArrayBuffer(base64);
+                await storeArrayBuffer(token.id, buffer);
+              } catch (e) {
+                console.warn(`恢复BIN数据失败 [${token.id}]:`, e);
+              }
+            }
+          }
+        }
+
         return {
           success: true,
           message: `成功导入 ${data.tokens.length} 个Token`,
@@ -1600,6 +1662,8 @@ export const useTokenStore = defineStore("tokens", () => {
     updateToken,
     removeToken,
     selectToken,
+    attemptTokenRefresh,
+    releaseConnectionLock,
 
     // Base64解析方法
     parseBase64Token,
@@ -1609,6 +1673,7 @@ export const useTokenStore = defineStore("tokens", () => {
     createWebSocketConnection,
     closeWebSocketConnection,
     getWebSocketStatus,
+    getConnectionInfo,
     getWebSocketClient,
     sendMessage,
     sendMessageWithPromise,

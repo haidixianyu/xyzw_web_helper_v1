@@ -6,7 +6,8 @@
       'full-page-mode':
         activeSection === 'saltFieldGroup' ||
         activeSection === 'peachGroup' ||
-        activeSection === 'rankGroup',
+        activeSection === 'rankGroup' ||
+        activeSection === 'shidian',
       'club-mode': activeSection === 'club',
     }"
   >
@@ -29,6 +30,7 @@
       <n-tab-pane name="peachGroup" tab="蟠桃园" />
       <n-tab-pane name="rankGroup" tab="排行榜" />
       <n-tab-pane name="fightPvp" tab="切磋" />
+      <n-tab-pane name="shidian" tab="十殿" />
     </n-tabs>
 
     <!-- 阵容（仅日常） -->
@@ -301,6 +303,9 @@
     </div>
     <!-- 切磋（提取组件） -->
     <FightPvp v-if="activeSection === 'fightPvp'" />
+
+    <!-- 十殿（单账号） -->
+    <ShiDianCard v-if="activeSection === 'shidian'" />
   </div>
 </template>
 
@@ -330,6 +335,7 @@ import TopClubList from "./cards/TopClubListPageCard.vue";
 import GreatRouteRankList from "./Club/GreatRouteRankListPageCard.vue";
 import GoldClubList from "./cards/GoldRankListPageCard.vue";
 import FightPvp from "./cards/FightPvp.vue";
+import ShiDianCard from "./cards/ShiDianCard.vue";
 import FightHelperCard from "./cards/FightHelperCard.vue";
 import DreamHelperCard from "./cards/DreamHelperCard.vue";
 import HeroUpgradeCard from "./cards/HeroUpgradeCard.vue";
@@ -807,6 +813,13 @@ onUnmounted(() => {
   width: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* 盐场、蟠桃园容器单独加高，显示更多俱乐部/敌方信息 */
+.salt-field-group .warrank-full-container,
+.peach-group .warrank-full-container {
+  height: calc(100vh - 80px);
+  min-height: 840px;
 }
 
 .monthly-tasks .description.muted {
