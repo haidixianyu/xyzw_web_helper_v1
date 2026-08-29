@@ -142,26 +142,6 @@
                   <template #trigger>
                     <n-button
                       size="small"
-                      type="info"
-                      ghost
-                      :loading="carOverviewLoading"
-                      :disabled="carOverviewLoading || isRunning || selectedTokens.length === 0"
-                      @click="fetchCarOverview"
-                    >
-                      发车信息
-                      <template #icon v-if="carOverviewLoading">
-                        <n-icon style="margin-left: 4px;">
-                          <Refresh />
-                        </n-icon>
-                      </template>
-                    </n-button>
-                  </template>
-                  查询发车状态，标签格式：未发车数/待收车数
-                </n-tooltip>
-                <n-tooltip placement="bottom" style="display: inline-flex;">
-                  <template #trigger>
-                    <n-button
-                      size="small"
                       type="success"
                       ghost
                       :loading="towerOverviewLoading"
@@ -231,7 +211,7 @@
                   :disabled="fullInfoLoading || isRunning || selectedTokens.length === 0"
                   @click="fetchFullInfo"
                 >
-                  完整信息
+                  原始数据
                   <template #icon v-if="fullInfoLoading">
                     <n-icon style="margin-left: 4px;">
                       <Refresh />
@@ -271,11 +251,16 @@
                   <div
                     v-for="group in tokenGroups"
                     :key="group.id"
+                    draggable="true"
                     @click="toggleGroupSelection(group.id)"
+                    @dragstart="onGroupDragStart(group, $event)"
+                    @dragover="onGroupDragOver(group, $event)"
+                    @drop.prevent="onGroupDrop(group)"
+                    @dragend="onGroupDragEnd"
                     :style="{
                       padding: '8px 12px',
                       borderRadius: '6px',
-                      cursor: 'pointer',
+                      cursor: 'grab',
                       backgroundColor: isGroupSelected(group.id)
                         ? group.color
                         : 'transparent',
@@ -284,6 +269,11 @@
                       fontWeight: isGroupSelected(group.id) ? '600' : '400',
                       transition: 'all 0.3s ease',
                       userSelect: 'none',
+                      opacity: draggingGroupId === group.id ? 0.4 : 1,
+                      boxShadow:
+                        dragOverGroupId === group.id
+                          ? '0 0 0 2px rgba(64, 128, 255, 0.6)'
+                          : 'none',
                     }"
                   >
                     {{ group.name }} ({{
@@ -424,16 +414,6 @@
                         :type="getStatusType(token.id)"
                       >
                         {{ getStatusText(token.id) }}
-                      </n-tag>
-                      <!-- 发车信息：未发车数/待收车数 -->
-                      <n-tag
-                        v-if="carOverview[token.id]"
-                        size="small"
-                        :type="carOverview[token.id].claimable > 0 ? 'warning' : 'default'"
-                        :bordered="carOverview[token.id].claimable > 0"
-                        :title="`未发车 ${carOverview[token.id].notSent} / 待收车 ${carOverview[token.id].claimable}（运输中 ${carOverview[token.id].inTransit}）`"
-                      >
-                        {{ carOverview[token.id].notSent }}/{{ carOverview[token.id].claimable }}
                       </n-tag>
                       <!-- 换皮闯关：已通关层数/8 -->
                       <n-tag
@@ -603,24 +583,6 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchSmartSendCar"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  智能发车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimCars"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键收车
-                </n-button>
-                <n-button
-                  size="small"
                   @click="legion_storebuygoods"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -637,24 +599,6 @@
                 >
                   一键答题
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartSendCar"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  智能发车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimCars"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键收车
-                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="quickWed" tab="周三">
@@ -665,24 +609,6 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键答题
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartSendCar"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
-                  "
-                >
-                  智能发车
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimCars"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键收车
                 </n-button>
                 <n-button
                   size="small"
@@ -918,6 +844,24 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键领取蟠桃园任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchSmartSendCar"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isCarActivityOpen
+                  "
+                >
+                  智能发车
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchClaimCars"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键收车
                 </n-button>
                 <n-button
                   size="small"
@@ -2648,7 +2592,7 @@
                   size="small"
                 />
                 <span class="setting-hint"
-                  >批量智能发车时，优先从同俱乐部且已指定的人员中选择护卫；若该俱乐部无指定人员，则按红数最多的人选择。留空则不限制。</span
+                  >已设置逻辑：发车账号所在俱乐部含有指定护卫时，仅用指定护卫（按红数排序优先），全部满4辆即停止发车。未设置逻辑（俱乐部无指定护卫）：用全部成员（按红数最多优先），护卫满4辆时也停止发车。留空则全部按未设置逻辑。</span
                 >
               </div>
             </div>
@@ -3730,17 +3674,11 @@ const dailyReminder = (() => {
   return reminders[new Date().getDay()] || "";
 })();
 
-// =====================
-// 发车信息概览
-// =====================
-const carOverview = ref({}); // { [tokenId]: { total, notSent, inTransit, claimable, cars: [] } }
-const carOverviewLoading = ref(false);
-
 // 换皮闯关信息
 const towerOverview = ref({}); // { [tokenId]: { cleared, total } }
 const towerOverviewLoading = ref(false);
 
-// 完整信息
+// 原始数据
 const fullInfoLoading = ref(false);
 
 // 十殿信息
@@ -3881,26 +3819,35 @@ const fetchConsumptionInfo = async () => {
       const name = token ? token.name : tokenId;
       try {
         await ensureConnection(tokenId);
-        // 拉取角色信息：金砖数 + 黑市周本周消耗金砖
+        // 拉取角色信息：金砖库存 + 本周活动消耗（黑市周看金砖 / 招募周看贝壳）
         const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const diamond = roleInfo?.role?.diamond ?? 0;
-        // role 下字面键 "wa:diamond"：黑市周本周消耗的金砖（递归查找，兼容不同层级）
-        const weekDiamond = Number(deepFindKey(roleInfo, "wa:diamond")) || 0;
-        // 档位信息
-        const tiers = [1000, 5000, 10000, 15000, 20000, 35000, 50000, 75000, 100000];
+        // 招募周显示贝壳消耗(wa:pearl)，其余周维持金砖消耗(wa:diamond)
+        // 递归查找，兼容字段位于响应不同层级
+        const isRecruitWeek = currentWeekType.value === "招募周";
+        const weekConsumption =
+          Number(
+            deepFindKey(roleInfo, isRecruitWeek ? "wa:pearl" : "wa:diamond"),
+          ) || 0;
+        // 档位信息：招募周贝壳仅 200 一档；金砖为多档
+        const tiers = isRecruitWeek
+          ? [200]
+          : [1000, 5000, 10000, 15000, 20000, 35000, 50000, 75000, 100000];
         let reached = 0;
         for (const t of tiers) {
-          if (weekDiamond >= t) reached = t;
+          if (weekConsumption >= t) reached = t;
           else break;
         }
-        const currentTier = reached ? `￥${reached}` : "未达到最低档";
-        const nextTierObj = tiers.find((t) => t > weekDiamond);
+        const currentTier = reached
+          ? `${isRecruitWeek ? "" : "￥"}${reached}`
+          : "未达到最低档";
+        const nextTierObj = tiers.find((t) => t > weekConsumption);
         const nextInfo = nextTierObj
-          ? `${nextTierObj}（差 ${Math.max(0, nextTierObj - weekDiamond)}）`
+          ? `${nextTierObj}（差 ${Math.max(0, nextTierObj - weekConsumption)}）`
           : "已满档";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${name} 消耗信息：本周金砖消耗(黑市达标)${weekDiamond}，当前达到档位：${currentTier}，下一档：${nextInfo}，当前金砖(库存)${diamond}`,
+          message: `${name} 消耗信息：本周${isRecruitWeek ? "贝壳" : "金砖"}消耗(${isRecruitWeek ? "招募达标" : "黑市达标"})${weekConsumption}，当前达到档位：${currentTier}，下一档：${nextInfo}，当前金砖(库存)${diamond}`,
           type: "success",
         });
       } catch (e) {
@@ -6441,6 +6388,47 @@ const clearAllGroupSelection = () => {
 };
 
 /**
+ * 分组拖动排序（拖拽分组标签改变顺序，顺序自动持久化到 localStorage）
+ */
+const draggingGroupId = ref(null);
+const dragOverGroupId = ref(null);
+
+const onGroupDragStart = (group, e) => {
+  draggingGroupId.value = group.id;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(group.id));
+  }
+};
+
+const onGroupDragOver = (group, e) => {
+  if (e) e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  if (draggingGroupId.value && draggingGroupId.value !== group.id) {
+    dragOverGroupId.value = group.id;
+  }
+};
+
+const onGroupDrop = (group) => {
+  const sourceId = draggingGroupId.value;
+  const targetId = group.id;
+  dragOverGroupId.value = null;
+  draggingGroupId.value = null;
+  if (!sourceId || sourceId === targetId) return;
+  const list = tokenGroups.value;
+  const from = list.findIndex((g) => g.id === sourceId);
+  const to = list.findIndex((g) => g.id === targetId);
+  if (from === -1 || to === -1) return;
+  const [moved] = list.splice(from, 1);
+  list.splice(to, 0, moved);
+};
+
+const onGroupDragEnd = () => {
+  draggingGroupId.value = null;
+  dragOverGroupId.value = null;
+};
+
+/**
  * 从token name中提取短ID（最后一段数字，如"哇哇笑-0-545630303"→"545630303"）
  */
 const extractShortId = (tokenName) => {
@@ -6706,6 +6694,33 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     // 等待连接槽位，限制并发连接数
     await waitForConnectionSlot();
 
+    // 优化：若已知该账号 token 已过期（上次连接记录的 lastError），
+    // 先用新 token 建连，避免拿过期 token 干等 connectionTimeout(10s) 超时
+    const connInfo = tokenStore.getConnectionInfo?.(tokenId);
+    const knownExpired =
+      connInfo?.lastError?.error &&
+      String(connInfo.lastError.error).toLowerCase().includes("token expired");
+    if (knownExpired) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${latestToken.name} token已过期，先刷新Token再连接`,
+        type: "warning",
+      });
+      try {
+        await tokenStore.attemptTokenRefresh(tokenId, false, true);
+      } catch (refreshErr) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `预刷新Token异常: ${refreshErr?.message || refreshErr}`,
+          type: "warning",
+        });
+      }
+    }
+
+    // 刷新成功后 tokens.value 已更新，重新读取最新 token
+    const connectToken =
+      tokens.value.find((t) => t.id === tokenId) || latestToken;
+
     addLog({
       time: new Date().toLocaleTimeString(),
       message: `正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
@@ -6714,8 +6729,8 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
 
     tokenStore.createWebSocketConnection(
       tokenId,
-      latestToken.token,
-      latestToken.wsUrl,
+      connectToken.token,
+      connectToken.wsUrl,
     );
     connected = await waitForConnection(tokenId);
 
@@ -6855,83 +6870,6 @@ window.__simulateTokenExpired = function (tokenId) {
   message.warning(`已模拟 ${t.name} 的 token 过期`);
 };
 
-// 查询发车信息概览（未发车/已发车/可收车）
-const fetchCarOverview = async () => {
-  const targetIds =
-    selectedTokens.value.length > 0
-      ? [...selectedTokens.value]
-      : tokens.value.map((t) => t.id);
-
-  if (targetIds.length === 0) {
-    message.warning("没有可查询的账号");
-    return;
-  }
-
-  carOverviewLoading.value = true;
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const tokenId of targetIds) {
-    if (shouldStop.value) break;
-    const token = tokens.value.find((t) => t.id === tokenId);
-    if (!token) {
-      failCount++;
-      continue;
-    }
-    try {
-      await ensureConnection(tokenId);
-      const res = await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "car_getrolecar",
-        {},
-        10000,
-      );
-      const carList = normalizeCars(res?.body ?? res);
-      let notSent = 0;
-      let inTransit = 0;
-      let claimable = 0;
-      for (const car of carList) {
-        if (Number(car.sendAt || 0) === 0) {
-          notSent++;
-        } else if (canClaim(car)) {
-          claimable++;
-        } else {
-          inTransit++;
-        }
-      }
-      carOverview.value[tokenId] = {
-        total: carList.length,
-        notSent,
-        inTransit,
-        claimable,
-        updatedAt: new Date().toLocaleTimeString(),
-      };
-      successCount++;
-    } catch (e) {
-      failCount++;
-      carOverview.value[tokenId] = {
-        total: 0,
-        notSent: 0,
-        inTransit: 0,
-        claimable: 0,
-        error: e.message,
-        updatedAt: new Date().toLocaleTimeString(),
-      };
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `查询发车信息失败 ${token?.name || tokenId}: ${e.message}`,
-        type: "warning",
-      });
-    } finally {
-      tokenStore.closeWebSocketConnection(tokenId);
-      releaseConnectionSlot();
-    }
-  }
-
-  carOverviewLoading.value = false;
-  message.success(`发车信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
-};
-
 // 查询换皮闯关关数
 // 今日开放 BOSS 类型映射（周五=1, 周六=2, 周日=3, 周一=4, 周二=5, 周三=6, 周四=全部）
 const todayTowerTypes = (() => {
@@ -7044,7 +6982,7 @@ const fetchFullInfo = async () => {
       const fullJson = JSON.stringify(roleInfoResp, null, 2);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `【完整信息】${token.name}\n${fullJson}`,
+        message: `【原始数据】${token.name}\n${fullJson}`,
         type: "info",
       });
       successCount++;
@@ -7052,7 +6990,7 @@ const fetchFullInfo = async () => {
       failCount++;
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${token.name} 查询完整信息失败: ${e.message}`,
+        message: `${token.name} 查询原始数据失败: ${e.message}`,
         type: "warning",
       });
     } finally {
@@ -7062,7 +7000,7 @@ const fetchFullInfo = async () => {
   }
 
   fullInfoLoading.value = false;
-  message.success(`完整信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
+  message.success(`原始数据查询完成: 成功 ${successCount}，失败 ${failCount}`);
 };
 
 const createTaskDeps = () => ({

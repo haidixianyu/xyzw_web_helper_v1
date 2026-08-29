@@ -41,6 +41,20 @@
       </div>
     </div>
 
+    <!-- 出战队员选择 -->
+    <div class="join-row" style="margin-top: 8px;">
+      <span class="label" style="white-space: nowrap;">出战队员</span>
+      <n-select
+        v-model:value="selectedFighterId"
+        :options="fighterOptions"
+        filterable
+        clearable
+        placeholder="选择出战的队员账号"
+        size="small"
+        style="flex: 1"
+      />
+    </div>
+
     <!-- 操作按钮 -->
     <div class="op-grid">
       <n-button size="small" :loading="busy === 'refresh'" :disabled="!isConnected || !!busy" @click="refreshInfo">
@@ -58,8 +72,14 @@
       <n-button size="small" :loading="busy === 'setFighter'" :disabled="!isConnected || !!busy" @click="setFighter">
         出战人员
       </n-button>
+      <n-button size="small" ghost :loading="busy === 'roomMembers'" :disabled="!isConnected || !!busy" @click="refreshRoomMembers">
+        房间成员
+      </n-button>
       <n-button size="small" type="warning" :loading="busy === 'startFight'" :disabled="!isConnected || !!busy" @click="startFight">
         开始十殿
+      </n-button>
+      <n-button size="small" type="primary" ghost :loading="busy === 'fightNext'" :disabled="!isConnected || !!busy" @click="fightNextLevel">
+        打下一关
       </n-button>
       <n-button size="small" type="error" :loading="busy === 'dismissRoom'" :disabled="!isConnected || !!busy" @click="dismissRoom">
         解散十殿
@@ -104,7 +124,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useMessage } from "naive-ui";
-import { useTokenStore } from "@/stores/tokenStore";
+import { useTokenStore, gameTokens } from "@/stores/tokenStore";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -128,6 +148,19 @@ const info = ref({
 });
 
 const joinTeamId = ref("");
+// 出战的队员账号（可选，供"打下一关"使用）
+const selectedFighterId = ref("");
+// 当前十殿房间成员（点「房间成员」后刷新）
+const roomMembers = ref([]);
+// 出战队员下拉选项：优先房间成员；未刷新时退回账号列表
+const fighterOptions = computed(() =>
+  roomMembers.value.length
+    ? roomMembers.value
+    : gameTokens.value.map((t) => ({
+        label: `${t.name}${t.server ? `(${t.server})` : ""}${t.id === token.value?.id ? "（当前）" : ""}`,
+        value: t.id,
+      })),
+);
 const busy = ref(""); // 当前执行中的操作标识
 const commandDelay = 300; // 命令间隔（毫秒）
 const logs = ref([]);
@@ -313,6 +346,81 @@ const getTeamId = async () => {
   return Number(teamId);
 };
 
+// 刷新当前十殿房间的成员名单（同队账号）
+const refreshRoomMembers = async () => {
+  if (!ensureToken()) return;
+  busy.value = "roomMembers";
+  try {
+    const roleId = await getRoleId();
+    const mine = await tokenStore.sendMessageWithPromise(
+      token.value.id,
+      "matchteam_getroleteaminfo",
+      { roleID: parseInt(roleId) },
+      12000,
+    );
+    const myTeams = mine?.roleMTData?.gDMTData || {};
+    // 十殿队伍：优先 teamCfgId===7（十殿配置），否则非 cfg1 的队伍，再退化为全部
+    const myKeys = Object.keys(myTeams);
+    const sDianTeamKey =
+      myKeys.find((k) => Number(myTeams[k]?.teamCfgId) === 7) ||
+      myKeys.find((k) => Number(myTeams[k]?.teamCfgId) !== 1) ||
+      (myKeys.length ? myKeys[0] : "");
+    if (!sDianTeamKey) {
+      message.warning("当前账号未加入任何队伍，请先加入十殿队伍");
+      roomMembers.value = [];
+      return;
+    }
+    const sDianTeamId = String(sDianTeamKey);
+    addLog(`当前十殿队伍 ${sDianTeamId}，正在匹配同队成员...`);
+    const members = [];
+    // 房主本身算一名成员
+    members.push({
+      label: `${token.value.name}${token.value.server ? `(${token.value.server})` : ""}（房主）`,
+      value: token.value.id,
+    });
+    // 依次检查其他账号是否也在该十殿队伍
+    for (const t of gameTokens.value) {
+      if (t.id === token.value.id) continue;
+      let inTeam = false;
+      try {
+        if (tokenStore.getWebSocketStatus(t.id) !== "connected") {
+          await tokenStore.createWebSocketConnection(t.id, t.token, t.wsUrl);
+          let n = 0;
+          while (tokenStore.getWebSocketStatus(t.id) !== "connected" && n < 20) {
+            await sleep(600);
+            n++;
+          }
+        }
+        const res = await tokenStore.sendMessageWithPromise(
+          t.id,
+          "matchteam_getroleteaminfo",
+          {},
+          8000,
+        );
+        const theirTeams = res?.roleMTData?.gDMTData || {};
+        inTeam = Object.keys(theirTeams).some(
+          (k) => String(k) === sDianTeamId,
+        );
+      } catch (e) {
+        addLog(`检查账号「${t.name}」失败，跳过: ${e?.message || e}`);
+      }
+      if (inTeam) {
+        members.push({
+          label: `${t.name}${t.server ? `(${t.server})` : ""}`,
+          value: t.id,
+        });
+      }
+    }
+    roomMembers.value = members;
+    addLog(`房间成员：${members.map((m) => m.label).join("、")}`);
+    message.success(`已获取房间成员 ${members.length} 人`);
+  } catch (e) {
+    handleErr("房间成员", e);
+  } finally {
+    busy.value = "";
+  }
+};
+
 // ============ 操作函数 ============
 // 刷新信息
 const refreshInfo = async () => {
@@ -451,6 +559,79 @@ const startFight = async () => {
   }
 };
 
+// 打下一关：由队内的一个队员账号出战，房主发起（自动判断下一殿）
+const fightNextLevel = async () => {
+  if (!ensureToken()) return;
+  if (!selectedFighterId.value) {
+    message.warning("请先选择出战的队员账号");
+    return;
+  }
+  const fighter = gameTokens.value.find((t) => t.id === selectedFighterId.value);
+  if (!fighter) {
+    message.warning("未找到所选队员账号");
+    return;
+  }
+  busy.value = "fightNext";
+  try {
+    const roleId = await getRoleId(); // 房主 roleId，用于获取房间
+    // 获取当前进度，自动判断下一殿（当前殿级+1）
+    const nmRes = await getNightmareInfo(roleId);
+    const stats = parseNightmareStats(nmRes);
+    // 房间号：优先用刚拉取到的真实房间号，其次才回落
+    const roomId = Number(stats.roomId) || Number(info.value.roomId) || Number(info.value.teamId);
+    if (!roomId) {
+      message.warning("未获取到房间号，请先点「刷新信息」");
+      return;
+    }
+    const nextLevel = (Number(stats.currentLevel) || 0) + 1;
+    // 出战的队员 roleId：账号名/ID 形如「名字-服务器-角色ID」，取末尾数字
+    // 取不到再实时查询该队员 roleId，兜底用其 token.id
+    const extractRoleId = (str) => {
+      const parts = String(str || "").split("-");
+      const tail = Number(parts[parts.length - 1]);
+      return Number.isInteger(tail) && tail > 0 ? String(tail) : "";
+    };
+    let fighterRoleId =
+      extractRoleId(fighter.name) || extractRoleId(fighter.id);
+    if (!fighterRoleId) {
+      try {
+        const fRole = await tokenStore.sendGetRoleInfo(fighter.id);
+        fighterRoleId = fRole?.role?.roleId
+          ? String(fRole.role.roleId)
+          : fighter.id;
+      } catch (e) {
+        fighterRoleId = fighter.id;
+      }
+    }
+    addLog(`房间号${roomId}，出战队员「${fighter.name}」roleId=${fighterRoleId}，目标第 ${nextLevel} 殿`);
+    // 由房主（当前选中账号）发出：设置队员出战 + 开始战斗
+    // 步骤1：房主设置队员出战（该命令服务器不回 ack，用 fire-and-forget 不等回包）
+    tokenStore.sendGameMessage(token.value.id, "nightmare_setfighter", {
+      roomId,
+      roleId: parseInt(fighterRoleId),
+    });
+    addLog("设置出战指令已发出");
+    // 步骤2：房主发起战斗
+    try {
+      await tokenStore.sendMessageWithPromise(
+        token.value.id,
+        "nightmare_fight",
+        { roomId, roleId: parseInt(fighterRoleId) },
+        20000,
+      );
+      addLog("开始战斗指令已发送并收到回包");
+      message.success(`第 ${nextLevel} 殿已由 ${fighter.name} 开始`);
+    } catch (e) {
+      addLog(`开始战斗超时/无回包: ${e?.message || e}（以游戏内实际为准）`);
+      message.info(`第 ${nextLevel} 殿指令已发出，请到游戏内确认`);
+    }
+  } catch (e) {
+    handleErr("打下一关", e);
+  } finally {
+    busy.value = "";
+  }
+};
+
 // 设置出战人员
 const setFighter = async () => {
   if (!ensureToken()) return;
@@ -460,14 +641,32 @@ const setFighter = async () => {
   }
   busy.value = "setFighter";
   try {
-    const roleId = await getRoleId();
-    addLog("正在设置出战人员...");
+    // 出战人员：从所选队员中挑 1 个作为出战（5 人中的 1 个）
+    if (!selectedFighterId.value) {
+      message.warning("请先选择出战的队员账号");
+      return;
+    }
+    const fighter = gameTokens.value.find((t) => t.id === selectedFighterId.value);
+    if (!fighter) {
+      message.warning("未找到所选队员账号");
+      return;
+    }
+    const extractRoleId = (str) => {
+      const parts = String(str || "").split("-");
+      const tail = Number(parts[parts.length - 1]);
+      return Number.isInteger(tail) && tail > 0 ? String(tail) : "";
+    };
+    const fighterRoleId =
+      extractRoleId(fighter.name) ||
+      extractRoleId(fighter.id) ||
+      fighter.id;
+    addLog(`设置出战: 队员「${fighter.name}」roleId=${fighterRoleId}，房间号${info.value.teamId}`);
     await tokenStore.sendGameMessage(token.value.id, "nightmare_setfighter", {
       roomId: info.value.teamId,
-      roleId: parseInt(roleId),
+      roleId: parseInt(fighterRoleId),
     });
     addLog("出战人员设置成功");
-    message.success("出战人员设置成功");
+    message.success(`出战人员已设为 ${fighter.name}`);
   } catch (e) {
     handleErr("出战人员", e);
   } finally {

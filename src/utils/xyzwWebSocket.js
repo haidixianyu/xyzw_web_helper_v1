@@ -100,15 +100,18 @@ export class CommandRegistry {
   }
 
   /** 注册命令 */
-  register(cmd, defaultBody = {}) {
+  register(cmd, defaultBody = {}, options = {}) {
+    const { rawBody = false } = options;
     this.commands.set(cmd, (ack = 0, seq = 0, params = {}) => ({
       cmd,
       ack,
       seq,
       time: Date.now(),
-      body: this.encoder?.bon?.encode
-        ? this.encoder.bon.encode({ ...defaultBody, ...params })
-        : { ...defaultBody, ...params },
+      body: rawBody
+        ? params
+        : this.encoder?.bon?.encode
+          ? this.encoder.bon.encode({ ...defaultBody, ...params })
+          : { ...defaultBody, ...params },
     }));
     return this;
   }
@@ -159,6 +162,7 @@ export function registerDefaultCommands(reg) {
     .register("system_getdatabundlever", { isAudit: false })
     .register("system_buygold", { buyNum: 1 })
     .register("system_claimhangupreward")
+    .register("system_hangupupgrade", { upgradeNum: 1 })
     .register("system_signinreward")
     .register("system_mysharecallback", { isSkipShareCard: true, type: 2 })
     .register("system_custom", { key: "", value: 0 })
@@ -178,11 +182,14 @@ export function registerDefaultCommands(reg) {
     .register("item_openbox", { itemId: 2001, number: 10 })
     .register("item_batchclaimboxpointreward")
     .register("item_openpack")
+    .register("item_consume")
     .register("rank_getserverrank")
 
     // 竞技场
     .register("arena_startarea")
     .register("fight_startlevel") // 获取 battleVersion
+    .register("fight_calcleveltime") // 计算主线关卡战斗时长
+    .register("fight_level", {}, { rawBody: true }) // 结算主线关卡
     .register("arena_getareatarget", { refresh: false })
     .register("arena_getarearank")
 
@@ -316,6 +323,7 @@ export function registerDefaultCommands(reg) {
     .register("nightmare_claimweekreward")
     .register("nightmare_clickturntable")
     .register("nightmare_setfighter")
+    .register("nightmare_fight")
     .register("nightmare_dismiss")
     .register("dungeon_selecthero")
     .register("bosstower_gethelprank")
@@ -1081,6 +1089,11 @@ export class XyzwWebSocketClient {
       legion_getarearankresp: "legion_getarearank",
       legionwar_getgoldmonthwarrankresp: "legionwar_getgoldmonthwarrank",
       nightmare_getroleinforesp: "nightmare_getroleinfo",
+      nightmare_setfighterresp: "nightmare_setfighter",
+      nightmare_fightresp: "nightmare_fight",
+      fight_startlevelresp: "fight_startlevel",
+      fight_calcleveltimeresp: "fight_calcleveltime",
+      fight_levelresp: "fight_level",
       studyresp: "study_startgame",
       role_getroleinforesp: "role_getroleinfo",
       apex_getroleinforesp: "apex_getroleinfo",
@@ -1090,7 +1103,9 @@ export class XyzwWebSocketClient {
       hero_recruitresp: "hero_recruit",
       friend_batchresp: "friend_batch",
       system_claimhanguprewardresp: "system_claimhangupreward",
+      system_hangupupgraderesp: "system_hangupupgrade",
       item_openboxresp: ["item_openbox", "item_batchclaimboxpointreward"],
+      item_consumeresp: "item_consume",
       bottlehelper_claimresp: "bottlehelper_claim",
       bottlehelper_startresp: "bottlehelper_start",
       bottlehelper_stopresp: "bottlehelper_stop",

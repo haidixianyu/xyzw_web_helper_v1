@@ -249,12 +249,34 @@
         </n-tabs>
       </div>
 
+      <!-- 蟠桃园信息 样式切换 -->
+      <div
+        class="style-switch-bar"
+        v-if="peachSubTab === 'peach'"
+        style="
+          padding: 0 8px 8px;
+          background: var(--n-color);
+          display: flex;
+          justify-content: center;
+        "
+      >
+        <n-radio-group v-model:value="peachStyle" size="small">
+          <n-radio-button value="style1">样式一</n-radio-button>
+          <n-radio-button value="style2">样式二</n-radio-button>
+        </n-radio-group>
+      </div>
+
       <div class="warrank-full-container" v-if="peachSubTab === 'peachBattle'">
         <PeachBattleRecords />
       </div>
 
-      <div class="warrank-full-container" v-if="peachSubTab === 'peach'">
-        <PeachInfo />
+      <div
+        class="warrank-full-container"
+        :class="{ 'style2-container': peachStyle === 'style2' }"
+        v-if="peachSubTab === 'peach'"
+      >
+        <PeachInfoV2 v-if="peachStyle === 'style2'" />
+        <PeachInfo v-else />
       </div>
     </div>
 
@@ -363,6 +385,19 @@ const activeSection = ref("daily");
 const saltFieldSubTab = ref("warrank");
 const peachSubTab = ref("peach");
 const rankSubTab = ref("serverrank");
+
+// 盐场匹配信息详情 / 蟠桃园信息 界面样式选择（style1=原有样式，style2=移植样式）
+const warrankStyle = ref(
+  localStorage.getItem("club_warrank_style") || "style1"
+);
+const peachStyle = ref(localStorage.getItem("peach_info_style") || "style1");
+
+watch(warrankStyle, (newStyle) => {
+  localStorage.setItem("club_warrank_style", newStyle);
+});
+watch(peachStyle, (newStyle) => {
+  localStorage.setItem("peach_info_style", newStyle);
+});
 
 // 活动开放时间：仅周一到周三可参与
 const isActivityOpen = computed(() => {
@@ -799,6 +834,19 @@ onUnmounted(() => {
   height: calc(100vh - 200px);
   min-height: 600px;
   overflow: hidden;
+
+  @media (max-width: 768px) {
+    height: calc(100vh - 180px);
+    min-height: 500px;
+  }
+}
+
+/* 样式二（移植版）容器尺寸，不影响样式一 */
+.warrank-full-container.style2-container {
+  position: relative;
+  z-index: 1;
+  height: calc(100vh - 180px);
+  min-height: 700px;
 
   @media (max-width: 768px) {
     height: calc(100vh - 180px);

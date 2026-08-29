@@ -51,6 +51,16 @@
             <span>批量日常</span>
           </router-link>
           <router-link
+            to="/admin/PushingLevels"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <ArrowUpCircle />
+            </n-icon>
+            <span>主线推关</span>
+          </router-link>
+          <router-link
             to="/admin/message-test"
             class="nav-item"
             active-class="active"
@@ -194,6 +204,16 @@
           <span>批量日常</span>
         </router-link>
         <router-link
+          to="/admin/PushingLevels"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <ArrowUpCircle />
+          </n-icon>
+          <span>主线推关</span>
+        </router-link>
+        <router-link
           to="/admin/message-test"
           class="drawer-item"
           @click="isMobileMenuOpen = false"
@@ -245,6 +265,7 @@ import {
   LockClosedSharp,LockOpen,
   Menu,
   Layers,
+  ArrowUpCircle,
   ChevronBack,
   ChevronForward,
 } from "@vicons/ionicons5";

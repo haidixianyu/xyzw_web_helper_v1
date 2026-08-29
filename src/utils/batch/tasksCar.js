@@ -103,8 +103,10 @@ export function createTasksCar(deps) {
         // 2.5 Fetch Helper Data (Club Members & Usage)
         let helperUsageMap = {};
         let sortedHelpers = [];
-        // 最终护卫池：优先为同俱乐部且已指定的人员，无指定则退回按红数最多的全员
+        // 最终护卫池：已设置逻辑取指定护卫，未设置逻辑取俱乐部全部成员（均按红淬排序）
         let guardPool = [];
+        // true = 已设置逻辑（仅用指定护卫）；false = 未设置逻辑（全部成员）；两者护卫满4辆均停止发车
+        let useDesignatedOnly = false;
 
         // 封装获取护卫使用情况的方法
         const updateHelperUsage = async () => {
@@ -151,28 +153,48 @@ export function createTasksCar(deps) {
             }))
             .sort((a, b) => b.redQuench - a.redQuench);
 
-          // 指定护卫：在同俱乐部且已指定的人员范围内选择；该俱乐部无指定人员则按红数最多的人
+          // 指定护卫："设置"中存的是账号名（如 "名称-序号-角色ID"），
+          // 需解析为 角色ID / 游戏内角色名 的匹配集合，再与俱乐部成员比对，
+          // 否则账号名带后缀时永远匹配不上，无法真正理解指定护卫设置
           const designatedGuards = (batchSettings.designatedGuards || [])
             .map((s) => String(s).trim())
             .filter(Boolean);
-          const designatedMembers = sortedHelpers.filter((h) =>
-            designatedGuards.some((g) => g === h.id || g === h.name),
+          const guardMatchKeys = new Set();
+          designatedGuards.forEach((g) => {
+            guardMatchKeys.add(g);
+            // 1. 从账号列表中找到对应 token，取其角色ID与游戏内角色名
+            const t = tokens.value.find((t) => t.name === g || t.id === g);
+            if (t) {
+              if (t.id) guardMatchKeys.add(String(t.id));
+              if (t.roleName) guardMatchKeys.add(String(t.roleName));
+            }
+            // 2. 兼容 "名称-序号-角色ID" 账号名，提取末尾数字角色ID
+            const m = g.match(/-(\d{6,12})$/);
+            if (m) guardMatchKeys.add(m[1]);
+            // 3. 账号名本身可能就是角色ID
+            if (/^\d{6,12}$/.test(g)) guardMatchKeys.add(g);
+          });
+          const designatedMembers = sortedHelpers.filter(
+            (h) =>
+              (h.id && guardMatchKeys.has(h.id)) ||
+              (h.name && guardMatchKeys.has(h.name)),
           );
-          guardPool = designatedMembers.length
-            ? designatedMembers
-            : sortedHelpers;
+          // true = 已设置逻辑（仅用指定护卫，全部满4辆即停止发车）
+          // false = 未设置逻辑（俱乐部全部成员按红数优先，不因护卫满而停止）
+          useDesignatedOnly = designatedMembers.length > 0;
+          guardPool = useDesignatedOnly ? designatedMembers : sortedHelpers;
 
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: designatedMembers.length
-              ? `${token.name} 指定护卫 ${designatedMembers.length} 位（同俱乐部），优先选用`
-              : `${token.name} 无指定护卫或均不在该俱乐部，按红数最多的人选择（${sortedHelpers.length} 位潜在护卫）`,
+            message: useDesignatedOnly
+              ? `${token.name} 已设置指定护卫 ${designatedMembers.length} 位（同俱乐部），按已设置逻辑发车`
+              : `${token.name} 未设置指定护卫或均不在该俱乐部，按未设置逻辑发车（按红数最多的人选择，${sortedHelpers.length} 位潜在护卫）`,
             type: "info",
           });
         } catch (e) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 获取护卫数据失败: ${e.message}，将不带护卫发车`,
+            message: `${token.name} 获取护卫数据失败: ${e.message}，需要护卫的车辆将停止发车`,
             type: "warning",
             code: e.code // Log code if available
           });
@@ -180,7 +202,7 @@ export function createTasksCar(deps) {
 
         // Helper function to assign guard.
         // 返回 true = 可以发车（无需护卫 / 已分配护卫 / 已有护卫）；
-        // 返回 false = 需要护卫但无可用指定护卫，须停止发车
+        // 返回 false = 需要护卫但无可用护卫（已设置/未设置逻辑均停止发车）
         const assignHelperIfNeeded = async (car) => {
           const color = Number(car.color || 0);
           // Only Red(5) and above need guards
@@ -200,7 +222,7 @@ export function createTasksCar(deps) {
             return false;
           }
 
-          // Find best available helper
+          // Find best available helper (按红数排序后取第一个未满4辆的)
           const bestHelper = guardPool.find((h) => {
             const used = Number(helperUsageMap[h.id] || 0);
             return used < 4;
@@ -218,9 +240,10 @@ export function createTasksCar(deps) {
             return true;
           }
 
+          // 已设置/未设置逻辑：护卫池中所有护卫均已满4辆 → 停止发车
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫，但所有指定护卫次数已满，停止发车`,
+            message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫，但所有护卫次数已满，停止发车`,
             type: "warning",
           });
           return false;
