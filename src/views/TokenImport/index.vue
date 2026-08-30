@@ -84,13 +84,56 @@
       <!-- Token列表 -->
       <div v-if="tokenStore.hasTokens" class="tokens-section">
         <div class="section-header">
-          <n-space align="center">
+          <div class="header-row-top">
             <h2>我的Token列表 ({{ tokenStore.gameTokens.length }}个)</h2>
+            <div class="header-actions">
+              <n-tag
+                class="selected-token-tag"
+                :type="tokenStore.selectedToken ? 'success' : 'default'"
+                :bordered="true"
+                size="small"
+                round
+              >
+                {{
+                  tokenStore.selectedToken
+                    ? `已选：${tokenStore.selectedToken.name || tokenStore.selectedToken.id}`
+                    : "未选择账号"
+                }}
+              </n-tag>
+              <n-button
+                type="info"
+                size="small"
+                :disabled="!tokenStore.selectedToken"
+                @click="openGame"
+              >
+                打开游戏
+              </n-button>
+              <n-button type="success" size="small" @click="goToDashboard">
+                批量功能
+              </n-button>
+
+              <n-button
+                v-if="!showImportForm"
+                type="primary"
+                size="small"
+                @click="showImportForm = true"
+              >
+                添加Token
+              </n-button>
+
+              <n-dropdown :options="bulkOptions" @select="handleBulkAction">
+                <n-button size="small">批量操作</n-button>
+              </n-dropdown>
+            </div>
+          </div>
+
+          <div class="header-row-sub">
             <n-radio-group v-model:value="viewMode" size="small">
               <n-radio-button value="list">列表</n-radio-button>
               <n-radio-button value="card">卡片</n-radio-button>
             </n-radio-group>
-            <n-divider vertical style="height: 24px"></n-divider>
+            <span class="sub-divider"></span>
+            <span class="sub-label">排序</span>
             <n-button-group size="small">
               <n-button
                 @click="toggleSort('name')"
@@ -117,49 +160,30 @@
                 最后使用 {{ getSortIcon("lastUsed") }}
               </n-button>
             </n-button-group>
-          </n-space>
-          <div class="header-actions">
-            <n-button type="info" @click="openGame">
-              <template #icon>
-                <n-icon>
-                  <GameController />
-                </n-icon>
-              </template>
-              打开游戏
-            </n-button>
-            <n-button type="success" @click="goToDashboard">
-              <template #icon>
-                <n-icon>
-                  <List />
-                </n-icon>
-              </template>
-              批量功能
-            </n-button>
-
-            <n-button
-              v-if="!showImportForm"
-              type="primary"
-              @click="showImportForm = true"
-            >
-              <template #icon>
-                <n-icon>
-                  <Add />
-                </n-icon>
-              </template>
-              添加Token
-            </n-button>
-
-            <n-dropdown :options="bulkOptions" @select="handleBulkAction">
-              <n-button>
-                <template #icon>
-                  <n-icon>
-                    <Menu />
-                  </n-icon>
-                </template>
-                批量操作
-              </n-button>
-            </n-dropdown>
           </div>
+        </div>
+
+        <!-- 分组选择工具条：按分组选择后批量操作只作用于所选分组 -->
+        <div v-if="tokenGroups.length" class="group-toolbar">
+          <span class="group-toolbar-label">分组：</span>
+          <button
+            v-for="group in tokenGroups"
+            :key="group.id"
+            class="group-chip"
+            :class="{ selected: selectedGroupIds.includes(group.id) }"
+            :style="groupChipStyle(group)"
+            @click="toggleGroup(group)"
+          >
+            {{ group.name }}
+          </button>
+          <template v-if="selectedGroupIds.length">
+            <span class="group-selected-count">
+              已选 {{ selectedGroupTokens.length }} 个账号
+            </span>
+            <n-button size="tiny" quaternary @click="clearGroupSelection">
+              清空选择
+            </n-button>
+          </template>
         </div>
 
         <div class="tokens-grid" v-if="viewMode === 'card'">
@@ -647,10 +671,8 @@ import {
   Create,
   EllipsisHorizontal,
   Grid,
-  List,
   Home,
   Key,
-  Menu,
   Refresh,
   Star,
   SyncCircle,
@@ -698,6 +720,54 @@ const connectingTokens = ref(new Set());
 // 从localStorage读取上次的视图模式，默认为列表视图
 const viewMode = ref(localStorage.getItem("tokenViewMode") || "list");
 const dragIndex = ref(null);
+
+// 分组选择：选中的分组ID列表，用于按分组批量操作
+const selectedGroupIds = ref([]);
+const tokenGroups = computed(() => tokenStore.tokenGroups || []);
+
+// 选中的分组所包含的全部token ID（并集）
+const selectedGroupTokenIds = computed(() => {
+  const ids = new Set();
+  selectedGroupIds.value.forEach((groupId) => {
+    const group = tokenGroups.value.find((g) => g.id === groupId);
+    (group?.tokenIds || []).forEach((id) => ids.add(id));
+  });
+  return ids;
+});
+
+// 选中的分组对应的有效token列表
+const selectedGroupTokens = computed(() => {
+  const ids = selectedGroupTokenIds.value;
+  if (ids.size === 0) return [];
+  return tokenStore.gameTokens.filter((t) => ids.has(t.id));
+});
+
+// 获取批量操作的目标token列表：选中分组时操作分组内token，否则操作全部token
+const getTargetTokens = () => {
+  const ids = selectedGroupTokenIds.value;
+  if (ids.size === 0) return tokenStore.gameTokens;
+  return tokenStore.gameTokens.filter((t) => ids.has(t.id));
+};
+
+const toggleGroup = (group) => {
+  const index = selectedGroupIds.value.indexOf(group.id);
+  if (index >= 0) {
+    selectedGroupIds.value.splice(index, 1);
+  } else {
+    selectedGroupIds.value.push(group.id);
+  }
+};
+
+const groupChipStyle = (group) => {
+  const selected = selectedGroupIds.value.includes(group.id);
+  return selected
+    ? { backgroundColor: group.color, borderColor: group.color, color: "#fff" }
+    : { borderColor: group.color, color: group.color };
+};
+
+const clearGroupSelection = () => {
+  selectedGroupIds.value = [];
+};
 
 // 备注编辑状态管理
 const editingRemark = ref(null); // 当前正在编辑备注的tokenId
@@ -1287,18 +1357,20 @@ const deleteToken = (token) => {
 
 // 批量刷新所有URLToken
 const refreshAllTokens = async () => {
-  if (!tokenStore.gameTokens.length) {
+  // 选中分组时只刷新分组内Token，否则刷新全部
+  const targetTokens = getTargetTokens();
+  if (!targetTokens.length) {
     message.warning("没有可刷新的Token");
     return;
   }
 
-  const tokensToRefresh = tokenStore.gameTokens.filter(
+  const tokensToRefresh = targetTokens.filter(
     (token) =>
       token.importMethod === "url" ||
       token.importMethod === "wxQrcode" ||
       token.importMethod === "bin",
   );
-  const manualTokens = tokenStore.gameTokens.filter(
+  const manualTokens = targetTokens.filter(
     (token) => token.importMethod === "manual",
   );
 
@@ -1408,7 +1480,8 @@ const handleBulkAction = (key) => {
 
 const exportTokens = async () => {
   try {
-    const data = await tokenStore.exportTokens();
+    const targetIds = [...selectedGroupTokenIds.value];
+    const data = await tokenStore.exportTokens(false, targetIds);
     const dataStr = JSON.stringify(data, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
 
@@ -1425,7 +1498,8 @@ const exportTokens = async () => {
 
 const exportTokensWithBin = async () => {
   try {
-    const data = await tokenStore.exportTokens(true);
+    const targetIds = [...selectedGroupTokenIds.value];
+    const data = await tokenStore.exportTokens(true, targetIds);
     const dataStr = JSON.stringify(data, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
 
@@ -1518,7 +1592,7 @@ const base64ToArrayBuffer = (base64) => {
 // 批量导出BIN（仅BIN数据）
 const exportBinBulk = async () => {
   try {
-    const binTokens = tokenStore.gameTokens.filter(
+    const binTokens = getTargetTokens().filter(
       (t) => t.importMethod === "bin" || t.importMethod === "wxQrcode",
     );
     const binBuffers = {};
@@ -1584,48 +1658,60 @@ const importBinBulk = () => {
 };
 
 const cleanExpiredTokens = async () => {
-  const count = await tokenStore.cleanExpiredTokens();
+  const targetIds = [...selectedGroupTokenIds.value];
+  const count = await tokenStore.cleanExpiredTokens(targetIds);
   message.success(`已清理 ${count} 个过期Token`);
 };
 
 const disconnectAll = () => {
-  tokenStore.gameTokens.forEach((token) => {
+  const targetTokens = getTargetTokens();
+  targetTokens.forEach((token) => {
     tokenStore.closeWebSocketConnection(token.id);
   });
-  message.success("所有连接已断开");
+  message.success("连接已断开");
 };
 
 const clearAllTokens = () => {
+  const targetIds = [...selectedGroupTokenIds.value];
+  const hasSelection = targetIds.length > 0;
   dialog.error({
-    title: "清除所有Token",
-    content: "确定要清除所有Token吗？此操作无法恢复！",
+    title: hasSelection ? "清除选中的Token" : "清除所有Token",
+    content: hasSelection
+      ? `确定要清除选中的 ${targetIds.length} 个Token吗？此操作无法恢复！`
+      : "确定要清除所有Token吗？此操作无法恢复！",
     positiveText: "确定清除",
     negativeText: "取消",
     onPositiveClick: async () => {
-      await tokenStore.clearAllTokens();
-      message.success("所有Token已清除");
+      await tokenStore.clearAllTokens(targetIds);
+      message.success(hasSelection ? "选中的Token已清除" : "所有Token已清除");
     },
   });
 };
 
 // 一键连接更新所有token信息
 const updateAllTokenInfo = async () => {
-  if (tokenStore.gameTokens.length === 0) {
+  // 选中分组时只更新分组内Token，否则更新全部
+  const targetTokens = getTargetTokens();
+  if (targetTokens.length === 0) {
     message.warning("没有可更新的Token");
     return;
   }
 
+  const hasSelection = selectedGroupTokenIds.value.size > 0;
   dialog.warning({
-    title: "更新所有Token信息",
+    title: hasSelection ? "更新选中的Token信息" : "更新所有Token信息",
     content:
-      "此操作将逐个连接所有Token，获取最新的角色名称和服务器信息，完成后自动断开连接。\n\n预计耗时：约3-5秒/个Token",
+      (hasSelection
+        ? `将更新选中的 ${targetTokens.length} 个Token`
+        : "此操作将逐个连接所有Token") +
+      "，获取最新的角色名称和服务器信息，完成后自动断开连接。\n\n预计耗时：约3-5秒/个Token",
     positiveText: "开始更新",
     negativeText: "取消",
     onPositiveClick: async () => {
       try {
         let successCount = 0;
         let failCount = 0;
-        const totalTokens = tokenStore.gameTokens.length;
+        const totalTokens = targetTokens.length;
 
         // 显示进度提示
         const loadingMessage = message.loading(
@@ -1636,8 +1722,8 @@ const updateAllTokenInfo = async () => {
         );
 
         // 顺序处理每个token
-        for (let i = 0; i < tokenStore.gameTokens.length; i++) {
-          const token = tokenStore.gameTokens[i];
+        for (let i = 0; i < totalTokens; i++) {
+          const token = targetTokens[i];
 
           // 更新进度显示
           loadingMessage.content = `正在更新Token信息 (${i + 1}/${totalTokens}): ${token.name}`;
@@ -1661,7 +1747,7 @@ const updateAllTokenInfo = async () => {
           }
 
           // 添加短暂延迟，避免服务器压力过大
-          if (i < tokenStore.gameTokens.length - 1) {
+          if (i < totalTokens - 1) {
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
@@ -2152,7 +2238,6 @@ onUnmounted(() => {
   box-shadow: var(--shadow-medium);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - var(--spacing-2xl) * 4);
 }
 
 /* 深色主题下的列表区域背景 */
@@ -2169,32 +2254,108 @@ onUnmounted(() => {
 
 .section-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-xl);
+  flex-direction: column;
+  gap: var(--spacing-sm);
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--bg-primary);
-  padding: var(--spacing-lg) 0;
-  margin: -var(--spacing-xl) -var(--spacing-xl) var(--spacing-md);
-  padding: var(--spacing-xl);
+  margin: calc(-1 * var(--spacing-xl)) calc(-1 * var(--spacing-xl)) var(--spacing-md);
+  padding: var(--spacing-lg) var(--spacing-xl);
   border-bottom: 1px solid var(--border-light);
 
   h2 {
     color: var(--text-primary);
     font-size: var(--font-size-xl);
     margin: 0;
+    white-space: nowrap;
   }
+}
+
+.header-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.header-row-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.sub-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-light, #e4e7ec);
+  margin: 0 2px;
+}
+
+.sub-label {
+  font-size: 13px;
+  color: var(--text-secondary, #667085);
+  white-space: nowrap;
 }
 
 .header-actions {
   display: flex;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
   max-width: 100%;
-  overflow-x: auto;
+  flex-wrap: wrap;
   -webkit-overflow-scrolling: touch;
-  flex-wrap: nowrap;
+  align-items: center;
+}
+
+/* 当前选中账号提示 */
+.selected-token-tag {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 分组选择工具条 */
+.group-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 8px;
+  border-bottom: 1px solid var(--border-light, #e4e7ec);
+  margin-bottom: 10px;
+}
+
+.group-toolbar-label {
+  font-size: 12px;
+  color: var(--text-secondary, #667085);
+  white-space: nowrap;
+}
+
+.group-chip {
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background-color 0.2s, color 0.2s;
+  touch-action: manipulation;
+}
+
+.group-chip.selected {
+  font-weight: 600;
+}
+
+.group-selected-count {
+  font-size: 12px;
+  color: var(--text-secondary, #667085);
+  white-space: nowrap;
+  margin-left: 4px;
 }
 
 .tokens-grid {
@@ -2254,6 +2415,11 @@ onUnmounted(() => {
   scrollbar-width: thin;
   scrollbar-color: var(--border-medium) var(--bg-tertiary);
   flex: 1;
+
+  :deep(.n-card.active) {
+    border: 2px solid var(--primary-color);
+    background: rgba(102, 126, 234, 0.08);
+  }
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -2560,9 +2726,61 @@ onUnmounted(() => {
   }
 
   .section-header {
+    padding: var(--spacing-md);
+    margin: calc(-1 * var(--spacing-md)) calc(-1 * var(--spacing-md)) var(--spacing-sm);
+  }
+
+  .header-row-top {
     flex-direction: column;
-    gap: var(--spacing-md);
     align-items: stretch;
+    gap: var(--spacing-sm);
+
+    h2 {
+      font-size: var(--font-size-lg);
+      text-align: center;
+    }
+  }
+
+  /* 移动端操作按钮：等宽铺满一行，保证触控面积 */
+  .header-actions {
+    gap: 8px;
+    width: 100%;
+  }
+
+  .selected-token-tag {
+    width: 100%;
+    max-width: none;
+    text-align: center;
+  }
+
+  .header-actions :deep(.n-button) {
+    flex: 1 1 auto;
+    min-height: 38px;
+    padding: 0 8px;
+    font-size: 13px;
+    margin: 0;
+  }
+
+  .header-row-sub {
+    justify-content: center;
+  }
+
+  .header-row-sub :deep(.n-button) {
+    min-height: 34px;
+  }
+
+  .sub-divider {
+    display: none;
+  }
+
+  /* 移动端分组chip保持紧凑，兼顾触控 */
+  .group-toolbar {
+    gap: 6px;
+  }
+
+  .group-chip {
+    padding: 5px 12px;
+    font-size: 12px;
   }
 
   .token-timestamps {

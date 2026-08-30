@@ -38,6 +38,22 @@
         >
           全选
         </n-checkbox>
+        <n-tooltip placement="bottom">
+          <template #trigger>
+            <n-button
+              size="tiny"
+              quaternary
+              circle
+              @click="isAccountListCollapsed = !isAccountListCollapsed"
+            >
+              <n-icon :size="18">
+                <ChevronUp v-if="!isAccountListCollapsed" />
+                <ChevronDown v-else />
+              </n-icon>
+            </n-button>
+          </template>
+          {{ isAccountListCollapsed ? `展开全部 (${filteredTokens.length})` : '收起（仅显示已选）' }}
+        </n-tooltip>
         <div v-if="tokenGroups.length" class="group-list-inline">
           <button
             v-for="group in tokenGroups"
@@ -52,9 +68,9 @@
         </div>
       </div>
 
-      <div v-if="filteredTokens.length" class="token-grid">
+      <div v-if="displayedTokens.length" class="token-grid">
         <div
-          v-for="token in filteredTokens"
+          v-for="token in displayedTokens"
           :key="token.id"
           class="token-cell"
           :class="{ selected: selectedTokenIds.includes(token.id) }"
@@ -78,7 +94,11 @@
           ></span>
         </div>
       </div>
-      <n-empty v-else description="暂无账号" size="small" />
+      <n-empty
+        v-else
+        :description="isAccountListCollapsed ? '未选择账号' : '暂无账号'"
+        size="small"
+      />
     </n-card>
 
     <!-- 操作区：火把配置 + 控制按钮（同行） -->
@@ -244,6 +264,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useMessage } from "naive-ui";
+import { ChevronDown, ChevronUp } from "@vicons/ionicons5";
 import { useTokenStore } from "@/stores/tokenStore";
 import { BOSS_NAMES } from "./boss_names.js";
 
@@ -258,6 +279,8 @@ const tokenStore = useTokenStore();
 const selectedTokenIds = ref([]);
 const selectedGroupIds = ref([]);
 const searchKeyword = ref("");
+// 收起/展开账号列表，收起时仅显示已选中的账号
+const isAccountListCollapsed = ref(false);
 const autoContinue = ref(true);
 const maxRetries = ref(999999);
 const autoScroll = ref(true);
@@ -296,6 +319,13 @@ const filteredTokens = computed(() => {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword));
   });
+});
+
+// 收起时只显示已选中的账号
+const displayedTokens = computed(() => {
+  if (!isAccountListCollapsed.value) return filteredTokens.value;
+  const selectedSet = new Set(selectedTokenIds.value);
+  return filteredTokens.value.filter((token) => selectedSet.has(token.id));
 });
 
 const runningCount = computed(() => {

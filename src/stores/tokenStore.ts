@@ -1215,16 +1215,22 @@ export const useTokenStore = defineStore("tokens", () => {
   };
 
   // 工具方法
-  const exportTokens = async (includeBin = false) => {
+  const exportTokens = async (includeBin = false, tokenIds?: string[]) => {
+    // 支持按指定tokenIds导出（分组批量操作），未指定时导出全部
+    const targetTokens =
+      tokenIds && tokenIds.length
+        ? gameTokens.value.filter((t) => tokenIds.includes(t.id))
+        : gameTokens.value;
+
     const result: any = {
-      tokens: gameTokens.value,
+      tokens: targetTokens,
       exportedAt: new Date().toISOString(),
       version: "2.0",
     };
 
     if (includeBin) {
       const binBuffers: Record<string, string> = {};
-      for (const token of gameTokens.value) {
+      for (const token of targetTokens) {
         if (token.importMethod === "bin" || token.importMethod === "wxQrcode") {
           let buffer = await getArrayBuffer(token.id);
           if (!buffer) buffer = await getArrayBuffer(token.name);
@@ -1268,7 +1274,15 @@ export const useTokenStore = defineStore("tokens", () => {
     }
   };
 
-  const clearAllTokens = async () => {
+  const clearAllTokens = async (tokenIds?: string[]) => {
+    // 支持按指定tokenIds清除（分组批量操作），未指定时清除全部
+    if (tokenIds && tokenIds.length) {
+      for (const tokenId of tokenIds) {
+        await removeToken(tokenId);
+      }
+      return;
+    }
+
     // 关闭所有WebSocket连接
     Object.keys(wsConnections.value).forEach((tokenId) => {
       closeWebSocketConnection(tokenId);
@@ -1281,12 +1295,16 @@ export const useTokenStore = defineStore("tokens", () => {
     await clearAll();
   };
 
-  const cleanExpiredTokens = async () => {
+  const cleanExpiredTokens = async (tokenIds?: string[]) => {
     const now = new Date();
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
     // 找出需要清理的token
     const tokensToRemove = gameTokens.value.filter((token) => {
+      // 按指定tokenIds清理（分组批量操作），未指定时清理全部
+      if (tokenIds && tokenIds.length && !tokenIds.includes(token.id)) {
+        return false;
+      }
       // URL和bin文件导入的token设为长期有效，不会过期
       // 升级为长期有效的token也不会过期
       if (
