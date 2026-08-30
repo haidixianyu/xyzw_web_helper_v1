@@ -205,6 +205,21 @@
                 </n-button>
                 <n-button
                   size="small"
+                  type="info"
+                  ghost
+                  :loading="apexScheduleInfoLoading"
+                  :disabled="apexScheduleInfoLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchApexScheduleInfo"
+                >
+                  场次信息
+                  <template #icon v-if="apexScheduleInfoLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
                   type="warning"
                   ghost
                   :loading="fullInfoLoading"
@@ -3681,6 +3696,9 @@ const towerOverviewLoading = ref(false);
 // 原始数据
 const fullInfoLoading = ref(false);
 
+// 场次信息（逐鹿盐山竞猜赛季）
+const apexScheduleInfoLoading = ref(false);
+
 // 十殿信息
 const shidianInfoLoading = ref(false);
 
@@ -6950,6 +6968,88 @@ const fetchTowerOverview = async () => {
 
   towerOverviewLoading.value = false;
   message.success(`闯关信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
+};
+
+// 查询逐鹿盐山竞猜场次信息
+const fetchApexScheduleInfo = async () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择要查询的账号");
+    return;
+  }
+
+  const targetIds = [...selectedTokens.value];
+  apexScheduleInfoLoading.value = true;
+  let successCount = 0;
+  let failCount = 0;
+  const scheduleCounter = {};
+
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询场次信息(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+
+  for (const tokenId of targetIds) {
+    if (shouldStop.value) break;
+    const token = tokens.value.find((t) => t.id === tokenId);
+    if (!token) {
+      failCount++;
+      continue;
+    }
+    try {
+      await ensureConnection(tokenId);
+      const roleResp = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "apex_getroleinfo",
+        {},
+        8000,
+      );
+      const apexInfo = roleResp?.apexRoleInfo || {};
+      const guessMap = apexInfo.guessMap || {};
+      const guessClaimMap = apexInfo.guessClaimMap || {};
+
+      // 探测活跃场次：向服务端请求对阵数据，能返回的即为当前场次
+      const { scheduleId: activeId } = await tasksApex.resolveActiveScheduleId(
+        tokenId,
+        guessClaimMap,
+        apexScheduleId.value,
+      );
+      const guessedCount = activeId ? (guessMap[activeId] || []).length : 0;
+      if (activeId) {
+        scheduleCounter[activeId] = (scheduleCounter[activeId] || 0) + 1;
+      }
+
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: activeId
+          ? `${token.name} 场次信息：当前场次 ${activeId}，已竞猜 ${guessedCount} 队，历史场次 [${Object.keys(guessClaimMap).join(", ")}]`
+          : `${token.name} 场次信息：未找到有效场次（历史场次 [${Object.keys(guessClaimMap).join(", ") || "无"}]），请在输入框手动指定场次`,
+        type: activeId ? "success" : "warning",
+      });
+      successCount++;
+    } catch (e) {
+      failCount++;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 查询场次信息失败: ${e?.message || e}`,
+        type: "warning",
+      });
+    } finally {
+      tokenStore.closeWebSocketConnection(tokenId);
+      releaseConnectionSlot();
+    }
+  }
+
+  const summary = Object.keys(scheduleCounter)
+    .map((id) => `${id}: ${scheduleCounter[id]}个账号`)
+    .join("，");
+  apexScheduleInfoLoading.value = false;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 场次信息查询完成: 成功 ${successCount}，失败 ${failCount}${summary ? `。场次分布 ${summary}` : ""} ===`,
+    type: "info",
+  });
+  message.success(`场次信息查询完成: 成功 ${successCount}，失败 ${failCount}`);
 };
 
 // 查询完整角色信息
