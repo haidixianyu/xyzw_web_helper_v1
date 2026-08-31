@@ -572,7 +572,7 @@
                   <n-input-number
                     v-model:value="apexScheduleId"
                     size="small"
-                    :min="1"
+                    :min="0"
                     :max="999"
                     :step="1"
                     class="batch-count-input"
@@ -7009,21 +7009,41 @@ const fetchApexScheduleInfo = async () => {
       const guessClaimMap = apexInfo.guessClaimMap || {};
 
       // 探测活跃场次：向服务端请求对阵数据，能返回的即为当前场次
-      const { scheduleId: activeId } = await tasksApex.resolveActiveScheduleId(
+      const resolved = await tasksApex.resolveActiveScheduleId(
         tokenId,
         guessClaimMap,
         apexScheduleId.value,
       );
+      const activeId = resolved.scheduleId;
+      // 拉取该场次全部对阵（探测仅取第一页5组）
+      const allGroups = activeId
+        ? await tasksApex.fetchAllGuessGroups(tokenId, activeId, resolved.groups)
+        : [];
       const guessedCount = activeId ? (guessMap[activeId] || []).length : 0;
       if (activeId) {
         scheduleCounter[activeId] = (scheduleCounter[activeId] || 0) + 1;
       }
 
+      // 验证假设：apex_getguesslist 是否只返回"未竞猜"的对阵
+      // （返回的 teamId 应全部不在 guessMap[activeId] 中）
+      const guessedSet = new Set(guessMap[activeId] || []);
+      let overlap = 0;
+      for (const g of allGroups) {
+        for (const t of g || []) {
+          if (guessedSet.has(t?.teamId)) overlap++;
+        }
+      }
+      const totalGroups = activeId
+        ? overlap === 0
+          ? allGroups.length + guessedCount
+          : allGroups.length
+        : 0;
+
       addLog({
         time: new Date().toLocaleTimeString(),
         message: activeId
-          ? `${token.name} 场次信息：当前场次 ${activeId}，已竞猜 ${guessedCount} 队，历史场次 [${Object.keys(guessClaimMap).join(", ")}]`
-          : `${token.name} 场次信息：未找到有效场次（历史场次 [${Object.keys(guessClaimMap).join(", ") || "无"}]），请在输入框手动指定场次`,
+          ? `${token.name} 场次信息：当前场次 ${activeId}，未竞猜 ${allGroups.length} 组 + 已竞猜 ${guessedCount} 队 = 总 ${totalGroups} 组${overlap === 0 ? "（接口仅返回未竞猜对阵）" : `（含 ${overlap} 队已竞猜数据）`}，历史场次 [${Object.keys(guessClaimMap).join(", ")}]`
+          : `${token.name} 场次信息：未找到有效场次（${resolved.reason || "无对阵信息"}，历史场次 [${Object.keys(guessClaimMap).join(", ") || "无"}]），请在输入框手动指定场次`,
         type: activeId ? "success" : "warning",
       });
       successCount++;
@@ -7225,7 +7245,7 @@ const { batchShidianReward } = tasksShidian;
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);
-const apexScheduleId = ref(46);
+const apexScheduleId = ref(0);
 const footballPickOptions = [
   { label: "主胜", value: 1 },
   { label: "平局", value: 2 },

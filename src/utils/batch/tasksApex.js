@@ -27,30 +27,42 @@ export function createTasksApex(deps) {
 
   /**
    * 探测当前活跃竞猜场次
-   * guessClaimMap 保存的是所有历史赛季的竞猜记录，无法用"空对象"判断活跃场次。
-   * 准确方式：按候选场次调用 apex_getguesslist，取返回对阵数最多的场次（避免误选残留旧数据的场次）。
-   * 候选顺序：最大历史场次+4/+2（新赛季可能尚无记录）→ 历史场次从大到小 → 默认值。
+   * 规则：
+   * 1. 场次输入值 > 0：只查该场次，无对阵信息则返回 null（调用方应停止并提示）
+   * 2. 场次输入值 <= 0：以实时读取的最大场次 N 为起点，从 N+5 开始从大到小逐个
+   *    调用 apex_getguesslist，第一个有对阵信息的场次即为当前场次
    * @returns {Promise<{scheduleId: string|null, groups: Array}>}
    */
-  const resolveActiveScheduleId = async (tokenId, guessClaimMap, defaultScheduleId) => {
+  const resolveActiveScheduleId = async (tokenId, guessClaimMap, inputScheduleId) => {
+    const input = Number(inputScheduleId);
+
+    // 规则 1：手动指定场次，只查该场次
+    if (Number.isFinite(input) && input > 0) {
+      try {
+        const resp = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "apex_getguesslist",
+          { scheduleId: input, idx: 0 },
+          8000,
+        );
+        const groups = resp?.apexGuessList || [];
+        if (groups.length > 0) {
+          return { scheduleId: String(input), groups };
+        }
+      } catch (e) {
+        // 请求失败视为该场次无对阵信息
+      }
+      return { scheduleId: null, groups: [], reason: `指定场次 ${input} 无对阵信息` };
+    }
+
+    // 规则 2：从实时最大场次 N 的 N+5 开始，从大到小探测
     const nums = Object.keys(guessClaimMap || {})
       .map(Number)
       .filter((n) => Number.isFinite(n))
       .sort((a, b) => b - a);
+    const start = (nums.length > 0 ? nums[0] : 0) + 5;
 
-    const candidates = [];
-    if (nums.length > 0) {
-      candidates.push(nums[0] + 4, nums[0] + 2, ...nums);
-    }
-    const def = Number(defaultScheduleId);
-    candidates.push(def, def + 2);
-
-    let best = null;
-    const tried = new Set();
-    for (const sid of candidates) {
-      if (!Number.isFinite(sid) || sid <= 0 || tried.has(sid)) continue;
-      if (tried.size >= 8) break;
-      tried.add(sid);
+    for (let sid = start; sid > start - 12; sid--) {
       try {
         const resp = await tokenStore.sendMessageWithPromise(
           tokenId,
@@ -59,21 +71,18 @@ export function createTasksApex(deps) {
           8000,
         );
         const groups = resp?.apexGuessList || [];
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `场次探测 ${sid}: ${groups.length} 组对阵`,
-          type: "debug",
-        });
-        if (groups.length > 0 && (!best || groups.length > best.groups.length)) {
-          best = { scheduleId: String(sid), groups };
+        if (groups.length > 0) {
+          return { scheduleId: String(sid), groups };
         }
-        // 64强为 32 组，达到即可提前结束探测
-        if (best && best.groups.length >= 32) break;
       } catch (e) {
-        // 该场次无数据或报错，继续尝试下一个候选
+        // 该场次无数据或报错，继续探测下一个
       }
     }
-    return best || { scheduleId: null, groups: [] };
+    return {
+      scheduleId: null,
+      groups: [],
+      reason: `从 ${start} 向下探测 12 个场次均无对阵信息`,
+    };
   };
 
   /**
@@ -87,7 +96,11 @@ export function createTasksApex(deps) {
     const collect = (groups) => {
       let added = 0;
       for (const g of groups || []) {
-        const key = JSON.stringify((g || []).map((t) => t?.teamId));
+        // 按组内 teamId 排序后拼接作为去重 key，避免顺序差异导致误判
+        const key = (g || [])
+          .map((t) => t?.teamId)
+          .sort()
+          .join("|");
         if (!seen.has(key)) {
           seen.add(key);
           allGroups.push(g);
@@ -128,7 +141,7 @@ export function createTasksApex(deps) {
    * 一键批量逐鹿盐山竞猜
    * 自动选每组对阵中助威数最高的队伍
    */
-  const batchApexGuess = async (defaultScheduleId = 46) => {
+  const batchApexGuess = async (inputScheduleId = 0) => {
     if (selectedTokens.value.length === 0) return;
 
     isRunning.value = true;
@@ -170,23 +183,27 @@ export function createTasksApex(deps) {
           type: "debug",
         });
 
-        // 2. 探测当前活跃 scheduleId（能返回对阵数据的最大场次）
+        // 2. 按规则确定当前 scheduleId（>0 只用指定场次；<=0 从最大场次+5 向下探测）
         const resolved = await resolveActiveScheduleId(
           tokenId,
           guessClaimMap,
-          defaultScheduleId,
+          inputScheduleId,
         );
         const scheduleId = resolved.scheduleId;
 
         if (!scheduleId) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 未找到有效场次（已竞猜记录场次: ${
+            message: `${token.name} 停止竞猜: ${resolved.reason || "未找到对阵信息"}（已竞猜记录场次: ${
               Object.keys(guessClaimMap).join(", ") || "无"
-            }），请在输入框手动指定场次`,
-            type: "warning",
+            }）`,
+            type: "error",
           });
-          tokenStatus.value[tokenId] = "completed";
+          tokenStatus.value[tokenId] = "failed";
+          // 手动指定场次无对阵信息时，停止整个批量任务
+          if (Number(inputScheduleId) > 0) {
+            shouldStop.value = true;
+          }
           return;
         }
 
@@ -331,5 +348,6 @@ export function createTasksApex(deps) {
   return {
     batchApexGuess,
     resolveActiveScheduleId,
+    fetchAllGuessGroups,
   };
 }
