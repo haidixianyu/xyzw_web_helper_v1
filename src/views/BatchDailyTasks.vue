@@ -824,6 +824,19 @@
                 >
                   一键灯神扫荡
                 </n-button>
+                <n-popselect
+                  :value="campChallengeMode"
+                  :options="campChallengeModeOptions"
+                  trigger="click"
+                  @update:value="onCampChallengeModeChange"
+                >
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    营地挑战({{ campChallengeModeLabel }})
+                  </n-button>
+                </n-popselect>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
@@ -3342,6 +3355,7 @@ import {
   createTasksFootball,
   createTasksApex,
   createTasksShidian,
+  createTasksCampChallenge,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -4407,6 +4421,9 @@ const taskGroupDefinitions = [
       "batcharenafight",
       "batchSmartSendCar",
       "batchClaimCars",
+      "batchCampChallenge",
+      "batchCampChallengePet",
+      "batchCampClaimTasks",
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
@@ -7242,6 +7259,30 @@ const { batchApexGuess } = tasksApex;
 
 const tasksShidian = createTasksShidian(createTaskDeps());
 const { batchShidianReward } = tasksShidian;
+
+const tasksCampChallenge = createTasksCampChallenge(createTaskDeps());
+const { batchCampChallenge, batchCampChallengePet, batchCampClaimTasks } = tasksCampChallenge;
+
+// 营地挑战模式选择
+const campChallengeMode = ref("pet");
+const campChallengeModeOptions = [
+  { label: "挑战宠物", value: "pet" },
+  { label: "随机挑战人员", value: "random" },
+  { label: "领取任务奖励", value: "claim" },
+];
+const campChallengeModeLabel = computed(() => {
+  return campChallengeModeOptions.find((o) => o.value === campChallengeMode.value)?.label || "";
+});
+const onCampChallengeModeChange = async (val) => {
+  campChallengeMode.value = val;
+  if (val === "pet") {
+    await batchCampChallengePet();
+  } else if (val === "claim") {
+    await batchCampClaimTasks();
+  } else {
+    await batchCampChallenge();
+  }
+};
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);
