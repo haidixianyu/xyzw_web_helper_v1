@@ -87,6 +87,39 @@
           <div class="header-row-top">
             <h2>我的Token列表 ({{ tokenStore.gameTokens.length }}个)</h2>
             <div class="header-actions">
+              <span class="multi-game-selection-count">
+                {{ isOpeningMultiGame ? "正在准备" : "已选" }}
+                {{ multiGameSelectedTokenIds.size }} 个
+              </span>
+              <n-button
+                size="small"
+                :disabled="isOpeningMultiGame"
+                @click="selectAllMultiGameTokens"
+              >
+                {{ allMultiGameTokensSelected ? "已全选" : "全选" }}
+              </n-button>
+              <n-button
+                size="small"
+                :disabled="multiGameSelectedTokenIds.size === 0 || isOpeningMultiGame"
+                @click="clearMultiGameTokenSelection"
+              >
+                清空
+              </n-button>
+              <n-button
+                type="warning"
+                :disabled="
+                  multiGameSelectedTokenIds.size === 0 || isOpeningMultiGame
+                "
+                :loading="isOpeningMultiGame"
+                @click="openSelectedGames"
+              >
+                <template #icon>
+                  <n-icon>
+                    <GameController />
+                  </n-icon>
+                </template>
+                批量进入游戏（{{ multiGameSelectedTokenIds.size }}）
+              </n-button>
               <n-tag
                 class="selected-token-tag"
                 :type="tokenStore.selectedToken ? 'success' : 'default'"
@@ -202,6 +235,22 @@
           >
             <template #title>
               <a-space class="token-name" align="center">
+                <span
+                  class="multi-game-token-checkbox"
+                  @click.stop
+                  @mousedown.stop
+                  @dragstart.stop.prevent
+                >
+                  <n-checkbox
+                    :checked="multiGameSelectedTokenIds.has(token.id)"
+                    :disabled="isOpeningMultiGame"
+                    :aria-label="`选择 ${token.name} 批量进入游戏`"
+                    @click.stop
+                    @update:checked="
+                      (checked) => setMultiGameTokenSelected(token.id, checked)
+                    "
+                  />
+                </span>
                 <n-avatar
                   v-if="token.avatar"
                   :src="token.avatar"
@@ -403,6 +452,22 @@
             <n-space justify="space-between" align="center">
               <!-- Info -->
               <n-space align="center" :size="6">
+                <span
+                  class="multi-game-token-checkbox"
+                  @click.stop
+                  @mousedown.stop
+                  @dragstart.stop.prevent
+                >
+                  <n-checkbox
+                    :checked="multiGameSelectedTokenIds.has(token.id)"
+                    :disabled="isOpeningMultiGame"
+                    :aria-label="`选择 ${token.name} 批量进入游戏`"
+                    @click.stop
+                    @update:checked="
+                      (checked) => setMultiGameTokenSelected(token.id, checked)
+                    "
+                  />
+                </span>
                 <!-- 连接状态 - 移动到最前端显示 -->
                 <div style="min-width: 65px">
                   <a-badge
@@ -670,6 +735,7 @@ import {
   Copy,
   Create,
   EllipsisHorizontal,
+  GameController,
   Grid,
   Home,
   Key,
@@ -679,11 +745,17 @@ import {
   TrashBin,
 } from "@vicons/ionicons5";
 import { NIcon, NAlert, useDialog, useMessage } from "naive-ui";
-import { h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { transformToken, scheduleAuthUserRequest } from "@/utils/token";
 import { $emit } from "@/stores/events/index.ts";
 import useIndexedDB from "@/hooks/useIndexedDB";
+import { prepareMultiGameLaunch } from "@/utils/gameLauncher";
+import {
+  pruneTokenSelection,
+  selectAllTokenIds,
+  toggleTokenSelection,
+} from "@/utils/gameSelection";
 import lz4 from "lz4js";
 const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
   useIndexedDB();
@@ -720,6 +792,8 @@ const connectingTokens = ref(new Set());
 // 从localStorage读取上次的视图模式，默认为列表视图
 const viewMode = ref(localStorage.getItem("tokenViewMode") || "list");
 const dragIndex = ref(null);
+const multiGameSelectedTokenIds = ref(new Set());
+const isOpeningMultiGame = ref(false);
 
 // 分组选择：选中的分组ID列表，用于按分组批量操作
 const selectedGroupIds = ref([]);
@@ -751,11 +825,18 @@ const getTargetTokens = () => {
 
 const toggleGroup = (group) => {
   const index = selectedGroupIds.value.indexOf(group.id);
+  const groupTokenIds = group.tokenIds || [];
+  const next = new Set(multiGameSelectedTokenIds.value);
   if (index >= 0) {
     selectedGroupIds.value.splice(index, 1);
+    // 取消分组时，同步取消该分组账号的勾选
+    groupTokenIds.forEach((id) => next.delete(id));
   } else {
     selectedGroupIds.value.push(group.id);
+    // 选中分组时，作为快捷选择：勾选该分组全部账号
+    groupTokenIds.forEach((id) => next.add(id));
   }
+  multiGameSelectedTokenIds.value = next;
 };
 
 const groupChipStyle = (group) => {
@@ -767,6 +848,16 @@ const groupChipStyle = (group) => {
 
 const clearGroupSelection = () => {
   selectedGroupIds.value = [];
+  // 清空分组时，同步取消分组账号的勾选，保留手动勾选的非分组账号
+  const groupTokenIds = new Set();
+  tokenGroups.value.forEach((group) =>
+    (group.tokenIds || []).forEach((id) => groupTokenIds.add(id)),
+  );
+  const next = new Set();
+  multiGameSelectedTokenIds.value.forEach((id) => {
+    if (!groupTokenIds.has(id)) next.add(id);
+  });
+  multiGameSelectedTokenIds.value = next;
 };
 
 // 备注编辑状态管理
@@ -831,6 +922,43 @@ const sortedTokens = computed(() => {
     return 0;
   });
 });
+
+const selectedMultiGameTokens = computed(() =>
+  sortedTokens.value.filter((token) =>
+    multiGameSelectedTokenIds.value.has(token.id),
+  ),
+);
+const allMultiGameTokensSelected = computed(
+  () =>
+    sortedTokens.value.length > 0 &&
+    selectedMultiGameTokens.value.length === sortedTokens.value.length,
+);
+
+function setMultiGameTokenSelected(tokenId, checked) {
+  multiGameSelectedTokenIds.value = toggleTokenSelection(
+    multiGameSelectedTokenIds.value,
+    tokenId,
+    checked,
+  );
+}
+
+function selectAllMultiGameTokens() {
+  multiGameSelectedTokenIds.value = selectAllTokenIds(sortedTokens.value);
+}
+
+function clearMultiGameTokenSelection() {
+  multiGameSelectedTokenIds.value = new Set();
+}
+
+watch(
+  () => tokenStore.gameTokens.map((token) => token.id),
+  () => {
+    multiGameSelectedTokenIds.value = pruneTokenSelection(
+      multiGameSelectedTokenIds.value,
+      tokenStore.gameTokens,
+    );
+  },
+);
 
 // 切换排序
 const toggleSort = (field) => {
@@ -1860,6 +1988,35 @@ function convertBinToLx(buf) {
   return e;
 }
 
+async function openSelectedGames() {
+  if (selectedMultiGameTokens.value.length === 0 || isOpeningMultiGame.value) return;
+  const tokensToOpen = [...selectedMultiGameTokens.value];
+  isOpeningMultiGame.value = true;
+  try {
+    const { launch, failures } = await prepareMultiGameLaunch({
+      tokens: tokensToOpen,
+      getArrayBuffer,
+      localStorage: window.localStorage,
+      sessionStorage: window.sessionStorage,
+    });
+
+    if (launch.sessions.length === 0) {
+      message.error("所选账号均准备失败，请检查 BIN 数据后重试");
+      return;
+    }
+    if (failures.length > 0) {
+      const failedNames = failures.map((failure) => failure.name).join("、");
+      message.warning(`已跳过 ${failures.length} 个账号：${failedNames}`);
+    }
+    await router.push("/multi-game");
+  } catch (error) {
+    console.error("Batch game launch failed:", error);
+    message.error("批量进入游戏失败，请重试");
+  } finally {
+    isOpeningMultiGame.value = false;
+  }
+}
+
 const openGame = async () => {
   const token = tokenStore.selectedToken;
   if (!token) {
@@ -2316,6 +2473,18 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.multi-game-selection-count {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.multi-game-token-checkbox {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
 }
 
 /* 分组选择工具条 */
