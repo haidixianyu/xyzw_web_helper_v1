@@ -170,6 +170,17 @@ export default defineConfig(async () => {
             Referer: "https://open.weixin.qq.com/",
           },
         },
+        // Hortor 用户中心（短信验证码下发）代理
+        "/api/ucenter": {
+          target: "https://ucenter-app-server.hortorgames.com",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/ucenter/, ""),
+          secure: true,
+          headers: {
+            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 13)",
+            Accept: "application/json, text/plain, */*",
+          },
+        },
         // Hortor登录接口代理
         "/api/hortor": {
           target: "https://comb-platform.hortorgames.com",

@@ -48,6 +48,7 @@
             <n-radio-button value="manual"> 手动输入 </n-radio-button>
             <n-radio-button value="url"> URL获取 </n-radio-button>
             <n-radio-button value="wxQrcode"> 微信扫码获取 </n-radio-button>
+            <n-radio-button value="sms"> 短信登录 </n-radio-button>
             <n-radio-button value="bin"> BIN多角色获取 </n-radio-button>
             <n-radio-button value="singlebin"> BIN单角色获取 </n-radio-button>
           </n-radio-group>
@@ -67,6 +68,11 @@
             @cancel="() => (showImportForm = false)"
             @ok="() => (showImportForm = false)"
             v-if="importMethod === 'wxQrcode'"
+          />
+          <sms-login-form
+            @cancel="() => (showImportForm = false)"
+            @ok="() => (showImportForm = false)"
+            v-if="importMethod === 'sms'"
           />
           <bin-token-form
             @cancel="() => (showImportForm = false)"
@@ -726,6 +732,7 @@ import UrlTokenForm from "./url.vue";
 import BinTokenForm from "./bin.vue";
 import singleBinTokenForm from "./singlebin.vue";
 import WxQrcodeForm from "./wxqrcode.vue";
+import SmsLoginForm from "./smslogin.vue";
 
 import { useTokenStore, selectedTokenId } from "@/stores/tokenStore";
 import {
@@ -1116,7 +1123,8 @@ const refreshToken = async (token) => {
       message.success("Token刷新成功");
     } else if (
       token.importMethod === "wxQrcode" ||
-      token.importMethod === "bin"
+      token.importMethod === "bin" ||
+      token.importMethod === "sms"
     ) {
       let userToken = await getArrayBuffer(token.id);
       let usedOldKey = false;
@@ -1344,8 +1352,12 @@ const getTokenActions = (token) => {
     });
   }
 
-  // BIN/wxQrcode 类型显示导出/导入BIN选项
-  if (token.importMethod === "bin" || token.importMethod === "wxQrcode") {
+  // BIN/wxQrcode/sms 类型显示导出/导入BIN选项
+  if (
+    token.importMethod === "bin" ||
+    token.importMethod === "wxQrcode" ||
+    token.importMethod === "sms"
+  ) {
     actions.push({ type: "divider" });
     actions.push({
       label: "导出BIN",
@@ -1496,7 +1508,8 @@ const refreshAllTokens = async () => {
     (token) =>
       token.importMethod === "url" ||
       token.importMethod === "wxQrcode" ||
-      token.importMethod === "bin",
+      token.importMethod === "bin" ||
+      token.importMethod === "sms",
   );
   const manualTokens = targetTokens.filter(
     (token) => token.importMethod === "manual",
