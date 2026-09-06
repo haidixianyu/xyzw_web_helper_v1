@@ -18,6 +18,19 @@ export default {
     // Proxy configuration
     const proxies = [
       {
+        prefix: '/api/ucenter',
+        target: 'https://ucenter-app-server.hortorgames.com',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 12; 23117RK66C Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/95.0.4638.74 Mobile Safari/537.36',
+          'Accept': '*/*',
+          'Host': 'ucenter-app-server.hortorgames.com',
+          'Connection': 'keep-alive',
+          'Content-Type': 'application/json; charset=utf-8',
+          'Origin': 'https://xyzw-5gu.pages.dev',
+          'Referer': 'https://xyzw-5gu.pages.dev/'
+        }
+      },
+      {
         prefix: '/api/weixin-long',
         target: 'https://long.open.weixin.qq.com',
         headers: {
