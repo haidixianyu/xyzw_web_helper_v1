@@ -544,6 +544,19 @@
                   >
                     功法券领取
                   </n-button>
+                  <n-popselect
+                    :value="campChallengeMode"
+                    :options="campChallengeModeOptions"
+                    trigger="click"
+                    @update:value="onCampChallengeModeChange"
+                  >
+                    <n-button
+                      size="small"
+                      :disabled="isRunning || selectedTokens.length === 0"
+                    >
+                      营地挑战({{ campChallengeModeLabel }})
+                    </n-button>
+                  </n-popselect>
                 </n-space>
 
                 <!-- 竞猜与十殿 -->
@@ -824,19 +837,6 @@
                 >
                   一键灯神扫荡
                 </n-button>
-                <n-popselect
-                  :value="campChallengeMode"
-                  :options="campChallengeModeOptions"
-                  trigger="click"
-                  @update:value="onCampChallengeModeChange"
-                >
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                  >
-                    营地挑战({{ campChallengeModeLabel }})
-                  </n-button>
-                </n-popselect>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
