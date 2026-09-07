@@ -3851,37 +3851,84 @@ const fetchConsumptionInfo = async () => {
       const name = token ? token.name : tokenId;
       try {
         await ensureConnection(tokenId);
-        // 拉取角色信息：金砖库存 + 本周活动消耗（黑市周看金砖 / 招募周看贝壳）
+        // 拉取角色信息：金砖库存 + 本周活动消耗
         const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const diamond = roleInfo?.role?.diamond ?? 0;
-        // 招募周显示贝壳消耗(wa:pearl)，其余周维持金砖消耗(wa:diamond)
-        // 递归查找，兼容字段位于响应不同层级
-        const isRecruitWeek = currentWeekType.value === "招募周";
-        const weekConsumption =
-          Number(
-            deepFindKey(roleInfo, isRecruitWeek ? "wa:pearl" : "wa:diamond"),
-          ) || 0;
-        // 档位信息：招募周贝壳仅 200 一档；金砖为多档
-        const tiers = isRecruitWeek
-          ? [200]
-          : [1000, 5000, 10000, 15000, 20000, 35000, 50000, 75000, 100000];
-        let reached = 0;
-        for (const t of tiers) {
-          if (weekConsumption >= t) reached = t;
-          else break;
+        const weekType = currentWeekType.value;
+
+        // 宝箱周：宝箱消耗(activity:open:box) + 白玉消耗(wa:wd)，递归查找兼容字段位置
+        if (weekType === "宝箱周") {
+          const boxConsumption =
+            Number(deepFindKey(roleInfo, "activity:open:box")) || 0;
+          const wdConsumption = Number(deepFindKey(roleInfo, "wa:wd")) || 0;
+
+          // 宝箱达标仅一档 8000
+          const boxTiers = [8000];
+          let boxReached = 0;
+          for (const t of boxTiers) {
+            if (boxConsumption >= t) boxReached = t;
+            else break;
+          }
+          const boxCurrentTier = boxReached
+            ? `${boxReached}`
+            : "未达到最低档";
+          const boxNextTierObj = boxTiers.find((t) => t > boxConsumption);
+          const boxNextInfo = boxNextTierObj
+            ? `${boxNextTierObj}（差 ${Math.max(0, boxNextTierObj - boxConsumption)}）`
+            : "已满档";
+
+          // 白玉达标档位：10w-100w、125w、150w
+          const wdTiers = [
+            100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000,
+            900000, 1000000, 1250000, 1500000,
+          ];
+          let wdReached = 0;
+          for (const t of wdTiers) {
+            if (wdConsumption >= t) wdReached = t;
+            else break;
+          }
+          const wdCurrentTier = wdReached
+            ? `${wdReached / 10000}w`
+            : "未达到最低档";
+          const wdNextTierObj = wdTiers.find((t) => t > wdConsumption);
+          const wdNextInfo = wdNextTierObj
+            ? `${wdNextTierObj / 10000}w（差 ${Math.max(0, wdNextTierObj - wdConsumption)}）`
+            : "已满档";
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 消耗信息：宝箱消耗(宝箱达标)${boxConsumption}，当前达到档位：${boxCurrentTier}，下一档：${boxNextInfo}；白玉消耗(白玉达标)${wdConsumption}，当前达到档位：${wdCurrentTier}，下一档：${wdNextInfo}；当前金砖(库存)${diamond}`,
+            type: "success",
+          });
+        } else {
+          // 招募周显示贝壳消耗(wa:pearl)，其余周维持金砖消耗(wa:diamond)
+          const isRecruitWeek = weekType === "招募周";
+          const weekConsumption =
+            Number(
+              deepFindKey(roleInfo, isRecruitWeek ? "wa:pearl" : "wa:diamond"),
+            ) || 0;
+          // 档位信息：招募周贝壳仅 200 一档；金砖为多档
+          const tiers = isRecruitWeek
+            ? [200]
+            : [1000, 5000, 10000, 15000, 20000, 35000, 50000, 75000, 100000];
+          let reached = 0;
+          for (const t of tiers) {
+            if (weekConsumption >= t) reached = t;
+            else break;
+          }
+          const currentTier = reached
+            ? `${isRecruitWeek ? "" : "￥"}${reached}`
+            : "未达到最低档";
+          const nextTierObj = tiers.find((t) => t > weekConsumption);
+          const nextInfo = nextTierObj
+            ? `${nextTierObj}（差 ${Math.max(0, nextTierObj - weekConsumption)}）`
+            : "已满档";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 消耗信息：本周${isRecruitWeek ? "贝壳" : "金砖"}消耗(${isRecruitWeek ? "招募达标" : "黑市达标"})${weekConsumption}，当前达到档位：${currentTier}，下一档：${nextInfo}，当前金砖(库存)${diamond}`,
+            type: "success",
+          });
         }
-        const currentTier = reached
-          ? `${isRecruitWeek ? "" : "￥"}${reached}`
-          : "未达到最低档";
-        const nextTierObj = tiers.find((t) => t > weekConsumption);
-        const nextInfo = nextTierObj
-          ? `${nextTierObj}（差 ${Math.max(0, nextTierObj - weekConsumption)}）`
-          : "已满档";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${name} 消耗信息：本周${isRecruitWeek ? "贝壳" : "金砖"}消耗(${isRecruitWeek ? "招募达标" : "黑市达标"})${weekConsumption}，当前达到档位：${currentTier}，下一档：${nextInfo}，当前金砖(库存)${diamond}`,
-          type: "success",
-        });
       } catch (e) {
         addLog({
           time: new Date().toLocaleTimeString(),

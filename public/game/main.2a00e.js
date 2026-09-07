@@ -340,7 +340,9 @@ window.loadJscAndDecode = async function (url, callback) {
   jsCode = jsCode.replace(/cc\.assetManager\.loadAny=function\(\)\{\},?/g, '');
   // 删除 game 中禁用 loadBundle 的代码 (isH5 判断)
   jsCode = jsCode.replace(/[a-zA-Z]\.PlatformManager\.instance\.isH5&&\(cc\.assetManager\.loadBundle=function\(\)\{\}\),?/g, '');
-  console.log('[loadDecodeJSC] 已删除H5禁用代码');
+  // 强制 IsLastVersion=true，避免服务器版本更新后提示"版本非最新"导致盐场/蟠桃等 PVP 功能被禁用
+  jsCode = jsCode.replace(/([a-zA-Z_$][a-zA-Z0-9_$]*)\.GlobalVarManager\.instance\.set\(([a-zA-Z_$][a-zA-Z0-9_$]*)\.GlobalVarKey\.IsLastVersion,[^()]*(?:\([^()]*\)[^()]*)*\)/g, (m, a, b) => `${a}.GlobalVarManager.instance.set(${b}.GlobalVarKey.IsLastVersion,!0)`);
+  console.log('[loadDecodeJSC] 已删除H5禁用代码并强制 IsLastVersion=true');
   
   callback(jsCode)
 }
@@ -364,7 +366,8 @@ window.parseRemoteBundleVers = function (settingsObj) {
 }
 
 window.loadRemoteBundleVers = async function () {
-  const manifestUrl = `https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=0.32.0-android`
+  const version = typeof GAME_VERSION === 'string' && GAME_VERSION ? GAME_VERSION : '0.32.0-android'
+  const manifestUrl = `https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=${encodeURIComponent(version)}`
   console.log('[remoteAssets] POST manifest', manifestUrl)
 
   const settingsRes = await fetch(

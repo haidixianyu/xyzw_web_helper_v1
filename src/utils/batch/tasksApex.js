@@ -177,12 +177,6 @@ export function createTasksApex(deps) {
         const guessMap = apexInfo.guessMap || {};
         const guessClaimMap = apexInfo.guessClaimMap || {};
 
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 抓取到赛季信息 guessClaimMap: ${JSON.stringify(guessClaimMap)}`,
-          type: "debug",
-        });
-
         // 2. 按规则确定当前 scheduleId（>0 只用指定场次；<=0 从最大场次+5 向下探测）
         const resolved = await resolveActiveScheduleId(
           tokenId,
@@ -235,30 +229,6 @@ export function createTasksApex(deps) {
           type: "info",
         });
 
-        // 4.1 对阵数不足 32 组（64强阶段）时，抓取 apex_get64oppomap 原始响应，用于分析 64 强对阵结构
-        if (allGroups.length < 32) {
-          try {
-            const oppoResp = await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "apex_get64oppomap",
-              { scheduleId: Number(scheduleId), groupId: 0 },
-              8000,
-            );
-            const raw = JSON.stringify(oppoResp);
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 【64强对阵原始数据】scheduleId=${scheduleId} groupId=0: ${raw.length > 3000 ? raw.slice(0, 3000) + "...(截断)" : raw}`,
-              type: "debug",
-            });
-          } catch (e) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 抓取 apex_get64oppomap 失败: ${e?.message || e}`,
-              type: "debug",
-            });
-          }
-        }
-
         // 5. 遍历对阵，选助威最高的队伍竞猜
         let successCount = 0;
         let skipCount = 0;
@@ -295,18 +265,8 @@ export function createTasksApex(deps) {
             );
             guessedTeamIds.add(pick.teamId);
             successCount++;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 竞猜 ${pick.name} (${pick.teamId}) 助威:${pick.cheerCnt} ✓`,
-              type: "success",
-            });
           } catch (err) {
             failCount++;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 竞猜 ${pick.name} 失败: ${err.message}`,
-              type: "error",
-            });
           }
 
           // 竞猜间隔
