@@ -51,6 +51,16 @@
             <span>批量日常</span>
           </router-link>
           <router-link
+            to="/admin/batch-battle"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <GameController />
+            </n-icon>
+            <span>批量战斗</span>
+          </router-link>
+          <router-link
             to="/admin/PushingLevels"
             class="nav-item"
             active-class="active"
@@ -204,6 +214,16 @@
           <span>批量日常</span>
         </router-link>
         <router-link
+          to="/admin/batch-battle"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <GameController />
+          </n-icon>
+          <span>批量战斗</span>
+        </router-link>
+        <router-link
           to="/admin/PushingLevels"
           class="drawer-item"
           @click="isMobileMenuOpen = false"
@@ -266,6 +286,7 @@ import {
   Menu,
   Layers,
   ArrowUpCircle,
+  GameController,
   ChevronBack,
   ChevronForward,
 } from "@vicons/ionicons5";

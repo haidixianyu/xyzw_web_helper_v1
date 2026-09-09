@@ -122,6 +122,15 @@ const my_routes = [
         }
       },
       {
+        path: 'batch-battle',
+        name: 'BatchBattle',
+        component: () => import('@/views/BatchBattle.vue'),
+        meta: {
+          title: '批量战斗',
+          requiresToken: true
+        }
+      },
+      {
         path: 'PushingLevels',
         name: 'PushingLevels',
         component: () => import('@/views/PushingLevels.vue'),

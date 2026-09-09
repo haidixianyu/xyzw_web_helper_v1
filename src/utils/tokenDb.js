@@ -59,6 +59,44 @@ export async function deleteKV(key) {
   });
 }
 
+export async function getKVByPrefix(prefix) {
+  return withStore(STORE_KV, "readonly", (store) => {
+    return new Promise((resolve, reject) => {
+      const results = [];
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return resolve(results);
+        if (String(cursor.key).startsWith(prefix)) {
+          results.push({ key: String(cursor.key), value: cursor.value });
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+export async function deleteKVByPrefix(prefix, shouldDelete) {
+  return withStore(STORE_KV, "readwrite", (store) => {
+    return new Promise((resolve, reject) => {
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return resolve();
+        if (
+          String(cursor.key).startsWith(prefix) &&
+          (!shouldDelete || shouldDelete(String(cursor.key)))
+        ) {
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
 // User token
 export async function getUserToken() {
   return getKV("userToken");

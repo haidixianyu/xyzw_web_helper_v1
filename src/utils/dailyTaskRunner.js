@@ -715,6 +715,41 @@ export class DailyTaskRunner {
       },
     );
 
+    // 功法券领取
+    taskList.push({
+      name: "领取功法券",
+      execute: () =>
+        this.executeGameCommand(
+          tokenId,
+          "legacy_claimhangup",
+          {},
+          "领取功法券",
+          5000,
+        ),
+    });
+
+    // 罐子重置（停止计时 → 重新开始计时）
+    taskList.push({
+      name: "重置罐子",
+      execute: async () => {
+        await this.executeGameCommand(
+          tokenId,
+          "bottlehelper_stop",
+          {},
+          "停止罐子计时",
+          5000,
+        );
+        await workerSleep(500);
+        await this.executeGameCommand(
+          tokenId,
+          "bottlehelper_start",
+          {},
+          "开始罐子计时",
+          5000,
+        );
+      },
+    });
+
     // 执行
     const totalTasks = taskList.length;
     this.log(`共有 ${totalTasks} 个任务待执行`);
