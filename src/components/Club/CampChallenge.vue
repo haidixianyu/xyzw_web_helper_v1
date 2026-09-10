@@ -312,25 +312,27 @@
         <n-tab name="battleMap">
           <div class="tab-item-content">
             <n-icon><ShieldOutline /></n-icon>
-            <span>⚔️ 今日据点沙盘 (击破图表)</span>
+            <span class="tab-item-title">⚔️ 今日据点沙盘</span>
+            <span class="tab-item-sub">(击破图表)</span>
           </div>
         </n-tab>
         <n-tab name="todayDetails">
           <div class="tab-item-content">
             <n-icon><FlameOutline /></n-icon>
-            <span>🎯 今日公会对战详细 (催刀督战)</span>
+            <span class="tab-item-title">🎯 今日公会对战详细</span>
+            <span class="tab-item-sub">(催刀督战)</span>
           </div>
         </n-tab>
         <n-tab name="weekRoster">
           <div class="tab-item-content">
             <n-icon><TrophyOutline /></n-icon>
-            <span>📊 当周全员战绩 & 排位天梯</span>
+            <span class="tab-item-title">📊 当周全员战绩 & 排位天梯</span>
           </div>
         </n-tab>
         <n-tab name="lineupTable">
           <div class="tab-item-content">
             <n-icon><StatsChartOutline /></n-icon>
-            <span>🥋 详细武将布阵大表</span>
+            <span class="tab-item-title">🥋 详细武将布阵大表</span>
           </div>
         </n-tab>
       </n-tabs>
@@ -1925,6 +1927,7 @@ const todayTableColumns = [
     title: "角色名称",
     key: "name",
     width: 140,
+    fixed: "left",
     align: "center",
     render: (row: any) =>
       h(
@@ -3351,6 +3354,7 @@ const columns = [
     title: "角色名称",
     key: "name",
     width: 130,
+    fixed: "left",
     align: "center",
     render: (row: any) =>
       h(
@@ -4136,9 +4140,37 @@ onMounted(() => {
 .tab-item-content {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 600;
+  gap: 5px;
+  font-weight: 700;
   font-size: 14px;
+}
+.tab-item-title {
+  white-space: nowrap;
+}
+.tab-item-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary, #8a919f);
+  white-space: nowrap;
+}
+/* 高对比激活态: 主色滑动胶囊 + 白字激活项, 未激活项加深为深灰 */
+.camp-main-tabs :deep(.n-tabs-capsule) {
+  background: var(--primary-color, #667eea);
+  box-shadow: none;
+}
+.camp-main-tabs :deep(.n-tabs-tab) {
+  color: #4b5563;
+  font-weight: 600;
+}
+.camp-main-tabs :deep(.n-tab--active) {
+  color: #fff;
+}
+.camp-main-tabs :deep(.n-tab--active) .tab-item-title {
+  color: #fff;
+}
+.camp-main-tabs :deep(.n-tab--active) .tab-item-sub {
+  color: #fff;
+  opacity: 0.85;
 }
 
 .views-content-wrapper {
@@ -4747,5 +4779,266 @@ onMounted(() => {
 .club-rank-score .score-unit {
   font-size: 12px;
   color: #94a3b8;
+}
+
+/* ================= 移动端适配 (max-width: 768px) ================= */
+@media (max-width: 768px) {
+  .camp-challenge-container {
+    padding: 10px;
+  }
+
+  /* 顶部工具栏：按钮行整行铺开 */
+  .toolbar .left {
+    flex-wrap: wrap;
+  }
+  .toolbar .right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .match-title {
+    font-size: 14px;
+  }
+  .action-btn {
+    min-height: 36px;
+  }
+
+  /* 俱乐部 VS 对决卡：三栏改上下三段 */
+  .club-vs-container {
+    flex-direction: column;
+  }
+  .club-info {
+    padding: 12px 14px;
+  }
+  .vs-badge-container {
+    flex-direction: row;
+    padding: 6px 0;
+    gap: 8px;
+  }
+  .vs-badge {
+    font-size: 20px;
+  }
+  .rank-badge-text {
+    margin-top: 0;
+  }
+  .club-name {
+    font-size: 15px;
+  }
+
+  /* 统计面板 */
+  .stats-panel {
+    padding: 12px;
+  }
+
+  /* 4 大战术视图 Tab 横向滑动: 隐藏滚动条, 激活项主色下划线, 移动端去图标与括号说明 */
+  .camp-main-tabs :deep(.n-tabs-nav-scroll-wrapper) {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .camp-main-tabs :deep(.n-tabs-nav-scroll-wrapper)::-webkit-scrollbar {
+    display: none;
+  }
+  .camp-main-tabs :deep(.n-tab) {
+    min-height: 42px;
+    padding: 6px 12px;
+    flex: none;
+  }
+  .camp-main-tabs :deep(.n-tab--active) {
+    position: relative;
+  }
+  .camp-main-tabs :deep(.n-tab--active)::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 2px;
+    height: 3px;
+    border-radius: 2px;
+    background: #fff;
+  }
+  .tab-item-content {
+    font-size: 13px;
+    white-space: nowrap;
+    gap: 4px;
+  }
+  .tab-item-content :deep(.n-icon) {
+    display: none;
+  }
+  .tab-item-sub {
+    display: none;
+  }
+
+  /* 据点沙盘：卡片收缩为 2 列 */
+  .fortress-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .fortress-card {
+    padding: 10px;
+  }
+  .card-body {
+    gap: 8px;
+  }
+  .member-name {
+    font-size: 13px;
+  }
+  .member-power {
+    font-size: 12px;
+  }
+
+  /* 地图控制条 */
+  .map-control-bar {
+    padding: 10px;
+  }
+  .map-side-indicator {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .map-metrics-summary {
+    flex-wrap: wrap;
+  }
+  .map-filters-group {
+    width: 100%;
+    overflow-x: auto;
+  }
+  .map-filters-group :deep(.n-select) {
+    width: 150px !important;
+  }
+
+  /* 今日对战横幅：三栏改上下三段 */
+  .today-versus-score-banner {
+    padding: 12px;
+  }
+  .banner-sides-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .vs-divider {
+    flex-direction: row;
+    gap: 10px;
+    padding: 0;
+  }
+  .score-num {
+    font-size: 30px;
+  }
+  .combat-rate-display {
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+  }
+  .rate-detail {
+    width: 100%;
+  }
+
+  /* 胜率对比条 */
+  .comparison-bar-header {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+    text-align: center;
+  }
+  .bar-center-title {
+    width: 100%;
+  }
+
+  /* 催刀督战台 */
+  .attendance-control-panel {
+    padding: 10px;
+  }
+  .att-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+  .attendance-header {
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .att-title-group {
+    flex-wrap: wrap;
+  }
+  .att-title {
+    font-size: 14px;
+  }
+  .att-actions :deep(.n-button) {
+    width: 100%;
+    min-height: 38px;
+    margin-right: 0 !important;
+    white-space: normal;
+    height: auto;
+    padding: 6px 10px;
+  }
+
+  /* 大宽表卡片 */
+  .table-card {
+    padding: 8px 10px;
+  }
+  .table-header-title .header-left {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .table-header-title .header-right-sort {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    width: 100%;
+    scrollbar-width: none;
+  }
+  .table-header-title .header-right-sort::-webkit-scrollbar {
+    display: none;
+  }
+  .camp-data-table {
+    font-size: 12px;
+  }
+  /* 大宽表: 触屏横向滚动顺滑, 表头/单元格收紧防挤 */
+  .camp-data-table :deep(.n-scrollbar-container) {
+    -webkit-overflow-scrolling: touch;
+  }
+  .camp-data-table :deep(.n-data-table-th),
+  .camp-data-table :deep(.n-data-table-td) {
+    padding: 6px 8px;
+  }
+
+  /* 间距与滚动体验: 统一区块间距, 触屏滚动更跟手 */
+  .view-tabs-container {
+    margin-bottom: 10px;
+  }
+  .views-content-wrapper {
+    margin-top: 4px;
+  }
+  .battle-map-section,
+  .week-roster-section,
+  .members-table-section {
+    gap: 12px;
+  }
+  .schedule-chips,
+  .map-filters-group {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 排位天梯 */
+  .group-rank-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  .group-rank-section {
+    padding: 10px;
+  }
+
+  /* 阵容流派统计条 */
+  .lineup-summary-bar {
+    padding: 8px 10px;
+  }
+
+  /* 对战战报模态框 */
+  .personal-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .duel-player-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

@@ -130,9 +130,11 @@
                     <span class="ui-checkbox-box"></span>
                   </label>
                   <span class="roster-name">{{ getDisplayName(token) }}</span>
-                  <span class="ui-tag" :class="'ui-tag--' + getStatusType(token.id)">
-                    {{ getStatusText(token.id) }}
-                  </span>
+                  <span
+                    class="roster-status"
+                    :class="'roster-status--' + getStatusType(token.id)"
+                    :title="getStatusText(token.id)"
+                  ></span>
                 </div>
               </div>
 
@@ -2204,8 +2206,7 @@ onMounted(() => {
   gap: 8px 12px;
   margin-top: var(--spacing-sm);
 }
-@media (max-width: 880px) { .roster { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px) { .roster { grid-template-columns: 1fr; } }
+@media (max-width: 880px) { .roster { grid-template-columns: 1fr; } }
 .roster-item {
   display: flex;
   align-items: center;
@@ -2232,22 +2233,16 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-// ===== 标签 =====
-.ui-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.5;
-  white-space: nowrap;
+// ===== 账号连接状态圆点 =====
+.roster-status {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-tertiary, #c2c8d1);
 }
-.ui-tag--success { background: rgba(24, 160, 88, 0.12); color: var(--success-color); }
-.ui-tag--error { background: rgba(208, 48, 80, 0.12); color: var(--error-color); }
-.ui-tag--warning { background: rgba(245, 166, 35, 0.14); color: var(--warning-color); }
-.ui-tag--info { background: rgba(32, 128, 240, 0.12); color: var(--info-color); }
-.ui-tag--default { background: var(--bg-tertiary); color: var(--text-tertiary); }
+.roster-status--success { background: var(--success-color); }
+.roster-status--warning { background: var(--warning-color); }
 
 // ===== 原生 Tab =====
 .ui-tab-bar {
@@ -2850,11 +2845,68 @@ onMounted(() => {
 @media (max-width: 1024px) {
   .main-layout { grid-template-columns: 1fr; }
   .log-card { position: static; }
+  .log-card :deep(.n-card__content) { max-height: none; }
+  .log-card .log-container { max-height: 50vh; }
 }
 @media (max-width: 768px) {
   .container { padding: 0 var(--spacing-md); }
-  .header-content { flex-direction: column; align-items: flex-start; }
-  .header-actions { width: 100%; justify-content: flex-start; }
+
+  /* 头部: 标题整行, 状态条占满, 次要按钮三列, 主按钮整行 */
+  .header-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-sm);
+  }
+  .header-left { flex: none; }
+  .header-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-sm);
+  }
+  .header-actions .status-pill {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+  .header-actions .btn {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    padding-left: 6px;
+    padding-right: 6px;
+    font-size: var(--font-size-sm);
+  }
+  .header-actions .btn-primary { grid-column: 1 / -1; }
+
+  /* Tab 平分整行 */
+  .ui-tab-bar { width: 100%; }
+  .ui-tab { flex: 1; text-align: center; }
+
+  /* 表单行改为上下堆叠: 标签在上, 控件在下占满整行 */
+  .form-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  .form-label { flex: none; width: 100%; padding-top: 0; }
+  .switch-row { width: 100%; }
+  .switch-text { white-space: normal; }
+  .follow-col { width: 100%; }
+  .ui-number-input { width: 100%; }
+  .form-hint { align-self: flex-start; }
+
+  /* 账号清单操作区: 允许换行 */
+  .card-header { flex-wrap: wrap; }
+  .collapse-toggle { margin-left: 0; }
+
+  /* 日志区压缩高度 */
+  .log-card :deep(.n-card__content) { max-height: 45vh; }
+  .log-card .log-container { min-height: 120px; }
+}
+@media (max-width: 480px) {
+  .page-title { font-size: var(--font-size-xl); }
+  .page-subtitle { font-size: var(--font-size-xs); }
+  .group-chip { font-size: 13px; padding: 2px 8px; }
+  .log-card .log-item { font-size: 11px; }
+  .roster-item { padding: 5px 6px; gap: 6px; }
+  .roster-name { font-size: var(--font-size-xs); }
+  .roster-status { width: 8px; height: 8px; }
 }
 
 /* ===== 执行日志（与 BatchDailyTasks 一致的样式） ===== */

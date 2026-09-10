@@ -1010,8 +1010,20 @@ onUnmounted(() => {
     }
   }
 
-  .map-container-wrapper {
-    height: 400px !important;
+  .main-content-layout {
+    flex-direction: column;
+    height: auto;
+
+    .map-container-wrapper {
+      height: 400px !important;
+    }
+
+    .side-info-panel {
+      width: 100%;
+      height: 260px;
+      border-left: none;
+      border-top: 1px solid #eee;
+    }
   }
 }
 </style>

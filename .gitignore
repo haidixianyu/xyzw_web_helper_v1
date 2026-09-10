@@ -36,6 +36,9 @@ Thumbs.db
 # Logs
 logs
 *.log
+*.md
+pnpm-debug.log*
+lerna-debug.log*
 
 # Runtime data
 pids
@@ -64,6 +67,24 @@ jspm_packages/
 # Yarn Integrity file
 .yarn-integrity
 
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional eslint cache
+.eslintcache
+
+# parcel-bundler cache
+.parcel-cache
+
+# 用户敏感数据（token 凭证、bin 文件）- 不要上传到 git
+xyzw_data/
+
+# 临时测试与探查脚本目录
+scratch/
+
+# Vite 缓存
+.vite/
+
 # Local cache
 .cache/
 
@@ -76,6 +97,10 @@ temp/
 *.exe
 node_modules/
 dist.zip
+*.bin
+bin/
+server/config.json
+/dist260812.zip
 *.bin
 bin/
 server/config.json

@@ -2343,4 +2343,30 @@ onMounted(() => {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
+/* 移动端适配：操作栏堆叠 + 表格横向滚动 */
+@media (max-width: 768px) {
+  .header-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: var(--spacing-md);
+  }
+
+  .function-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+
+  .function-section .function-right {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .table-content {
+    overflow-x: auto;
+  }
+}
 </style>

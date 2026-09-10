@@ -1026,5 +1026,21 @@ onUnmounted(() => {
       margin-left: auto;
     }
   }
+
+  // 顶部主 Tabs 与各分组 segment 子导航：窄屏下允许横向滑动，避免文字挤压换行
+  .section-tabs :deep(.n-tabs-nav-scroll-wrapper),
+  .sub-nav :deep(.n-tabs-nav-scroll-wrapper) {
+    overflow-x: auto;
+  }
+
+  .section-tabs :deep(.n-tabs-nav-scroll-content),
+  .sub-nav :deep(.n-tabs-nav-scroll-content) {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .sub-nav {
+    padding: 6px 4px !important;
+  }
 }
 </style>
