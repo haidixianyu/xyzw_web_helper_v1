@@ -3903,6 +3903,17 @@ onMounted(() => {
     width: 100%;
     justify-content: flex-end;
     flex-wrap: wrap;
+
+    /* 日期选择器占满整行, 按钮换行不溢出 */
+    :deep(.n-date-picker) {
+      width: 100% !important;
+      flex: 1 1 100%;
+    }
+
+    .action-btn {
+      flex: 0 1 auto;
+      white-space: nowrap;
+    }
   }
 
   .table-content {

@@ -2843,13 +2843,26 @@ onMounted(() => {
 }
 
 @media (max-width: 1024px) {
-  .main-layout { grid-template-columns: 1fr; }
+  /* 单列时必须重置 grid-column, 否则日志列仍落在隐式第 2 列导致列宽撑爆 */
+  .main-layout { grid-template-columns: minmax(0, 1fr); }
+  .left-column,
+  .right-column { grid-column: 1; }
   .log-card { position: static; }
   .log-card :deep(.n-card__content) { max-height: none; }
   .log-card .log-container { max-height: 50vh; }
 }
 @media (max-width: 768px) {
-  .container { padding: 0 var(--spacing-md); }
+  /* 只收紧左右边距, 不覆盖 .batch-body 的 padding 简写 (否则上下 padding 丢失) */
+  .container { --page-gutter: var(--spacing-md); }
+
+  /* 页头 sticky 下移到顶部导航(56px)之下, 避免遮挡 */
+  .page-header {
+    top: 56px;
+    padding: var(--spacing-sm) 0;
+  }
+
+  /* 卡片内边距收紧 */
+  .card { padding: var(--spacing-md); }
 
   /* 头部: 标题整行, 状态条占满, 次要按钮三列, 主按钮整行 */
   .header-content {
@@ -2880,16 +2893,31 @@ onMounted(() => {
 
   /* Tab 平分整行 */
   .ui-tab-bar { width: 100%; }
-  .ui-tab { flex: 1; text-align: center; }
+  .ui-tab { flex: 1; text-align: center; padding: 10px 8px; }
 
   /* 表单行改为上下堆叠: 标签在上, 控件在下占满整行 */
-  .form-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: var(--spacing-sm) 0;
+  }
   .form-label { flex: none; width: 100%; padding-top: 0; }
-  .switch-row { width: 100%; }
-  .switch-text { white-space: normal; }
+  .switch-row { width: 100%; gap: 8px; }
+  .switch-text { white-space: normal; margin-right: 0; }
   .follow-col { width: 100%; }
   .ui-number-input { width: 100%; }
   .form-hint { align-self: flex-start; }
+
+  /* 分段选择器占满整行, 长文案允许换行 */
+  .ui-segmented { width: 100%; }
+  .ui-segmented-item { flex: 1; justify-content: center; }
+  .ui-segmented-item span { white-space: normal; text-align: center; line-height: 1.3; }
+
+  /* 多选面板限制宽度防溢出屏幕 */
+  .ui-multiselect { width: 100%; }
+  .ui-multiselect-summary { width: 100%; min-width: 0; }
+  .ui-multiselect-panel { max-width: calc(100vw - 64px); }
 
   /* 账号清单操作区: 允许换行 */
   .card-header { flex-wrap: wrap; }

@@ -561,14 +561,31 @@ const handleUserAction = async (key) => {
 
   .nav-container {
     height: 56px;
+    gap: 4px;
   }
 
   .brand-logo {
     display: none;
   }
 
+  .nav-brand {
+    margin-right: 0;
+    flex-shrink: 0;
+  }
+
   .brand-toggle {
     display: inline-flex;
+  }
+
+  /* 标题不再折成"XYZW/控制/台"三行 */
+  .brand-text {
+    white-space: nowrap;
+    font-size: 15px;
+  }
+
+  .nav-user {
+    gap: 2px;
+    min-width: 0;
   }
 }
 

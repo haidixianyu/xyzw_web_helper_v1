@@ -2149,5 +2149,21 @@ const formatNumber = (num) => {
       grid-template-columns: 1fr;
     }
   }
+
+  /* 统计卡数值 (战力/Boss剩余血量等) 窄屏下缩小并换行, 避免"664.74…"溢出卡片 */
+  :deep(.n-statistic) {
+    width: 100%;
+    min-width: 0;
+  }
+  :deep(.n-statistic .n-statistic-value) {
+    font-size: 20px;
+    display: block;
+    word-break: break-all;
+    white-space: normal;
+    line-height: 1.25;
+  }
+  :deep(.n-statistic .n-statistic__label) {
+    font-size: 12px;
+  }
 }
 </style>

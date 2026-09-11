@@ -994,4 +994,44 @@ onMounted(() => {
     }
   }
 }
+
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  .shidian-card {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .card-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-bottom: 12px;
+
+    .status-icon {
+      width: 40px;
+      height: 40px;
+      margin-right: 10px;
+    }
+
+    h3 {
+      font-size: 17px;
+    }
+  }
+
+  /* 操作按钮: 3 列网格, 手机上更紧凑 */
+  .op-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  /* 出战队员行: 标签不换行挤压, 下拉占满剩余 */
+  .join-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .log-box {
+    height: 200px;
+  }
+}
 </style>

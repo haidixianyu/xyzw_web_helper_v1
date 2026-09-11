@@ -1924,7 +1924,7 @@ const todayTableColumns = [
       h(NAvatar, { round: true, size: 34, src: row.headImg }),
   },
   {
-    title: "角色名称",
+    title: "成员姓名",
     key: "name",
     width: 140,
     fixed: "left",
@@ -2143,6 +2143,7 @@ const weeklyRosterColumns = [
     title: "成员姓名",
     key: "name",
     width: 140,
+    fixed: "left",
     align: "center",
     render: (row: any) =>
       h(
@@ -4153,7 +4154,8 @@ onMounted(() => {
   color: var(--text-tertiary, #8a919f);
   white-space: nowrap;
 }
-/* 高对比激活态: 主色滑动胶囊 + 白字激活项, 未激活项加深为深灰 */
+/* 高对比激活态: 主色滑动胶囊 + 白字激活项, 未激活项加深为深灰
+   注意: naive-ui segment tab 真实类名为 .n-tabs-tab / .n-tabs-tab--active */
 .camp-main-tabs :deep(.n-tabs-capsule) {
   background: var(--primary-color, #667eea);
   box-shadow: none;
@@ -4162,14 +4164,12 @@ onMounted(() => {
   color: #4b5563;
   font-weight: 600;
 }
-.camp-main-tabs :deep(.n-tab--active) {
+.camp-main-tabs :deep(.n-tabs-tab--active),
+.camp-main-tabs :deep(.n-tabs-tab--active) .tab-item-title,
+.camp-main-tabs :deep(.n-tabs-tab--active) .tab-item-sub {
   color: #fff;
 }
-.camp-main-tabs :deep(.n-tab--active) .tab-item-title {
-  color: #fff;
-}
-.camp-main-tabs :deep(.n-tab--active) .tab-item-sub {
-  color: #fff;
+.camp-main-tabs :deep(.n-tabs-tab--active) .tab-item-sub {
   opacity: 0.85;
 }
 
@@ -4829,36 +4829,42 @@ onMounted(() => {
     padding: 12px;
   }
 
-  /* 4 大战术视图 Tab 横向滑动: 隐藏滚动条, 激活项主色下划线, 移动端去图标与括号说明 */
-  .camp-main-tabs :deep(.n-tabs-nav-scroll-wrapper) {
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+  /* 4 大战术视图 Tab: 移动端两行(每行2个)网格布局。
+     注意: segment 胶囊 JS 只 translateX 不换行, 故移动端隐藏胶囊, 改为激活项自身上背景色 */
+  .camp-main-tabs :deep(.n-tabs-nav) {
+    overflow-x: visible;
   }
-  .camp-main-tabs :deep(.n-tabs-nav-scroll-wrapper)::-webkit-scrollbar {
+  .camp-main-tabs :deep(.n-tabs-rail) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+    padding: 4px;
+  }
+  .camp-main-tabs :deep(.n-tabs-capsule) {
     display: none;
   }
-  .camp-main-tabs :deep(.n-tab) {
-    min-height: 42px;
-    padding: 6px 12px;
+  .camp-main-tabs :deep(.n-tabs-tab-wrapper) {
     flex: none;
+    width: 100%;
   }
-  .camp-main-tabs :deep(.n-tab--active) {
-    position: relative;
+  .camp-main-tabs :deep(.n-tabs-tab-pad) {
+    display: none;
   }
-  .camp-main-tabs :deep(.n-tab--active)::after {
-    content: "";
-    position: absolute;
-    left: 10px;
-    right: 10px;
-    bottom: 2px;
-    height: 3px;
-    border-radius: 2px;
-    background: #fff;
+  .camp-main-tabs :deep(.n-tabs-tab) {
+    width: 100%;
+    min-height: 40px;
+    padding: 6px 8px;
+    border-radius: 8px;
+  }
+  .camp-main-tabs :deep(.n-tabs-tab--active) {
+    background: var(--primary-color, #667eea);
   }
   .tab-item-content {
-    font-size: 13px;
-    white-space: nowrap;
+    font-size: 12px;
+    white-space: normal;
+    text-align: center;
+    justify-content: center;
     gap: 4px;
   }
   .tab-item-content :deep(.n-icon) {
@@ -4968,6 +4974,13 @@ onMounted(() => {
     white-space: normal;
     height: auto;
     padding: 6px 10px;
+  }
+  /* n-button 内部 content 默认 nowrap 会撑破按钮, 强制换行 */
+  .att-actions :deep(.n-button__content) {
+    white-space: normal;
+    flex-wrap: wrap;
+    justify-content: center;
+    line-height: 1.35;
   }
 
   /* 大宽表卡片 */

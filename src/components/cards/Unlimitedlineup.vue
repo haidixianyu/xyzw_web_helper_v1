@@ -3507,4 +3507,63 @@ onMounted(() => {
   text-align: center;
   padding: var(--spacing-lg);
 }
+
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  /* 工具栏按钮换行, 不再溢出卡片右侧 */
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .current-team-section {
+    padding: var(--spacing-sm);
+  }
+
+  /* 英雄行: 允许换行, 属性区占满一行 */
+  .hero-item {
+    flex-wrap: wrap;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .hero-left {
+    flex-shrink: 0;
+  }
+
+  .hero-info {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  /* 属性彩签: 取消固定 90px 最小宽, 允许收缩 */
+  .hero-stats span {
+    min-width: 0;
+    padding: 2px 5px;
+    font-size: 11px;
+    white-space: normal;
+    word-break: break-all;
+  }
+
+  .hero-stats .stat-row {
+    gap: 4px;
+  }
+
+  /* 更换/下阵按钮: 移到行尾占满剩余宽度 */
+  .hero-actions {
+    flex-direction: row;
+    margin-left: auto;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .hero-actions :deep(.n-button) {
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .lineup-actions {
+    flex-wrap: wrap;
+  }
+}
 </style>

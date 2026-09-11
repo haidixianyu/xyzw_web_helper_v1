@@ -14,9 +14,10 @@
             gap: 12px;
           "
         >
-          <div style="display: flex; align-items: center; gap: 16px">
+          <div class="header-left-group" style="display: flex; align-items: center; gap: 16px">
             <h2>批量日常任务</h2>
             <div
+              class="header-status-box"
               style="
                 display: flex;
                 align-items: center;
@@ -41,7 +42,7 @@
               <div v-else style="font-size: 14px; color: #6c757d">
                 暂无定时任务
               </div>
-              <div style="display: flex; gap: 8px">
+              <div class="header-status-actions" style="display: flex; gap: 8px">
                 <n-button type="primary" size="small" @click="openTaskModal">
                   新增定时任务
                 </n-button>
@@ -62,6 +63,7 @@
             </div>
           </div>
           <div
+            class="header-actions-box"
             style="
               display: flex;
               align-items: center;
@@ -7989,9 +7991,10 @@ const stopBatch = () => {
 @media (max-width: 768px) {
   .batch-daily-tasks {
     padding: 12px;
-    height: 100vh;
-    overflow-y: auto;
-    overflow-x: hidden;
+    /* 高度交给外层页面滚动, 避免与 layout header 叠加出双滚动条 */
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .main-layout {
@@ -8022,6 +8025,68 @@ const stopBatch = () => {
   .page-header .actions {
     display: flex;
     gap: 8px;
+  }
+
+  /* 页头左侧: 标题与状态盒上下堆叠 */
+  .header-left-group {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  .header-left-group h2 {
+    font-size: 18px;
+  }
+
+  /* 定时任务状态盒: 内容换行 */
+  .header-status-box {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 8px 10px !important;
+    font-size: 12px;
+  }
+
+  .header-status-actions {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    width: 100%;
+  }
+
+  /* 主操作按钮盒: 4 个按钮换行, 开始执行占满整行 */
+  .header-actions-box {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 8px 10px !important;
+  }
+
+  .header-actions-box .n-button {
+    flex: 1 1 auto;
+  }
+
+  /* "开始执行"为主操作, 独占一行 */
+  .header-actions-box .n-button:first-child {
+    flex: 1 1 100%;
+  }
+
+  /* 排序按钮组: 允许换行不溢出 */
+  .sort-buttons {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .sort-buttons::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* 分组管理按钮行与统计文字换行 */
+  .group-selection-section {
+    padding: 10px;
+  }
+
+  /* 账号列表头部按钮区 (闯关信息/战力信息等) 保持换行 (内联已有 wrap) */
+  .token-list-card {
+    padding: 8px !important;
   }
 
   .log-card {

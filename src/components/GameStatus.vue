@@ -792,12 +792,17 @@ onUnmounted(() => {
 
 .game-status-container.full-page-mode {
   max-width: 100% !important;
-  grid-template-columns: 1fr;
+  /* minmax(0,1fr) + 子项 min-width:0 阻断宽表格撑破 grid 轨道导致的整页横向溢出 */
+  grid-template-columns: minmax(0, 1fr);
   padding: var(--spacing-sm);
 
   @media (min-width: 1400px) {
     max-width: 100% !important;
   }
+}
+
+.game-status-container.full-page-mode > * {
+  min-width: 0;
 }
 
 .game-status-container.club-mode {
@@ -1027,20 +1032,50 @@ onUnmounted(() => {
     }
   }
 
-  // 顶部主 Tabs 与各分组 segment 子导航：窄屏下允许横向滑动，避免文字挤压换行
-  .section-tabs :deep(.n-tabs-nav-scroll-wrapper),
-  .sub-nav :deep(.n-tabs-nav-scroll-wrapper) {
+  // 顶部主 Tabs：窄屏下允许横向滑动，避免文字挤压换行
+  .section-tabs :deep(.n-tabs-nav-scroll-wrapper) {
     overflow-x: auto;
   }
 
-  .section-tabs :deep(.n-tabs-nav-scroll-content),
-  .sub-nav :deep(.n-tabs-nav-scroll-content) {
+  .section-tabs :deep(.n-tabs-nav-scroll-content) {
     overflow-x: auto;
     flex-wrap: nowrap;
   }
 
   .sub-nav {
     padding: 6px 4px !important;
+  }
+
+  /* 分组 segment 子导航 (盐场/排行榜等): 窄屏改为自动换行网格。
+     segment 胶囊 JS 只 translateX 不支持换行, 故隐藏胶囊, 激活项自身上色 */
+  .sub-nav :deep(.n-tabs-rail) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 6px;
+    width: 100%;
+    padding: 4px;
+  }
+  .sub-nav :deep(.n-tabs-capsule) {
+    display: none;
+  }
+  .sub-nav :deep(.n-tabs-tab-wrapper) {
+    flex: none;
+    width: 100%;
+  }
+  .sub-nav :deep(.n-tabs-tab-pad) {
+    display: none;
+  }
+  .sub-nav :deep(.n-tabs-tab) {
+    width: 100%;
+    min-height: 36px;
+    padding: 5px 6px;
+    border-radius: 8px;
+    white-space: normal;
+    line-height: 1.3;
+  }
+  .sub-nav :deep(.n-tabs-tab--active) {
+    background: var(--primary-color, #667eea);
+    color: #fff;
   }
 }
 </style>
