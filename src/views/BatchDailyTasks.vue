@@ -414,9 +414,20 @@
                   <div class="token-row">
                     <n-checkbox
                       :value="token.id"
-                      :label="token.name"
                       class="token-checkbox"
-                    />
+                    >
+                      <span
+                        :class="{
+                          'shidian-low-name': isShidianLow(token.id),
+                        }"
+                        :title="
+                          isShidianLow(token.id)
+                            ? `本周十殿仅打到 ${shidianOverview[token.id]} 层（低于8层）`
+                            : ''
+                        "
+                        >{{ token.name }}</span
+                      >
+                    </n-checkbox>
                     <div v-if="!isAccountListCollapsed" class="token-tags">
                       <n-tag
                         v-if="token.power != null"
@@ -1324,6 +1335,19 @@
       style="width: 90%; max-width: 600px"
     >
       <div class="settings-content">
+        <!-- 操作按钮置于顶部: 移动端账号列表很长, 放底部难以触达 -->
+        <div class="modal-actions" style="margin-bottom: 16px; text-align: right">
+          <n-button @click="showApplyTemplateModal = false">取消</n-button>
+          <n-button
+            @click="applyTemplate"
+            type="success"
+            style="margin-left: 8px"
+            :disabled="
+              !selectedTemplateId || selectedTokensForApply.length === 0
+            "
+            >应用模板</n-button
+          >
+        </div>
         <div class="settings-grid">
           <div class="setting-item">
             <label class="setting-label">选择模板</label>
@@ -1402,17 +1426,6 @@
             </n-checkbox-group>
           </div>
         </div>
-        <div class="modal-actions" style="margin-top: 20px; text-align: right">
-          <n-button @click="showApplyTemplateModal = false">取消</n-button>
-          <n-button
-            @click="applyTemplate"
-            type="success"
-            :disabled="
-              !selectedTemplateId || selectedTokensForApply.length === 0
-            "
-            >应用模板</n-button
-          >
-        </div>
       </div>
     </n-modal>
 
@@ -1429,28 +1442,28 @@
           style="
             margin-bottom: 16px;
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
           "
         >
-          <div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
             <n-button type="primary" @click="openNewTemplateModal"
               >新增模板</n-button
             >
-            <n-button
-              @click="openApplyTemplateModal"
-              type="success"
-              style="margin-left: 8px"
+            <n-button @click="openApplyTemplateModal" type="success"
               >应用模板</n-button
             >
-            <n-button
-              @click="openAccountTemplateModal"
-              type="info"
-              style="margin-left: 8px"
+            <n-button @click="openAccountTemplateModal" type="info"
               >查看账号模板引用</n-button
             >
           </div>
-          <n-input placeholder="搜索模板" size="small" style="width: 200px" />
+          <n-input
+            placeholder="搜索模板"
+            size="small"
+            style="width: 200px; min-width: 140px; flex: 1"
+          />
         </div>
 
         <!-- Template List -->
@@ -1464,14 +1477,8 @@
             size="small"
             style="margin-bottom: 12px"
           >
-            <div
-              style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-              "
-            >
-              <div>
+            <div class="template-card-row">
+              <div class="template-card-info">
                 <h4 style="margin: 0; margin-bottom: 8px">
                   {{ template.name }}
                 </h4>
@@ -1483,9 +1490,15 @@
                   >
                 </div>
               </div>
-              <div style="display: flex; gap: 8px">
+              <div class="template-card-actions">
                 <n-button size="small" @click="openEditTemplateModal(template)"
                   >编辑</n-button
+                >
+                <n-button
+                  size="small"
+                  type="success"
+                  @click="applyTemplateToAll(template)"
+                  >应用到全部</n-button
                 >
                 <n-button
                   size="small"
@@ -3708,6 +3721,12 @@ const dailyReminder = (() => {
 // 换皮闯关信息
 const towerOverview = ref({}); // { [tokenId]: { cleared, total } }
 const towerOverviewLoading = ref(false);
+const shidianOverview = ref({}); // { [tokenId]: 本周已打层数 }
+
+// 本周十殿已打层数低于8层（仅在查询过该账号后判断）
+const isShidianLow = (tokenId) =>
+  Object.prototype.hasOwnProperty.call(shidianOverview.value, tokenId) &&
+  shidianOverview.value[tokenId] < 8;
 
 // 原始数据
 const fullInfoLoading = ref(false);
@@ -3788,10 +3807,11 @@ const fetchShidianOverview = async () => {
           }
         }
         const currentLevel = Number(res?.nightmare?.level) || 0;
+        shidianOverview.value = { ...shidianOverview.value, [tokenId]: finalLevel };
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${name} 十殿信息：本周已打到 ${finalLevel} 层（当前殿级 ${currentLevel}）`,
-          type: "success",
+          type: finalLevel < 8 ? "warning" : "success",
         });
       } catch (e) {
         addLog({
@@ -6053,6 +6073,37 @@ const applyTemplate = () => {
   showApplyTemplateModal.value = false;
 };
 
+// 一键把模板应用到全部账号（覆盖所有账号现有任务配置）
+const applyTemplateToAll = (template) => {
+  const allTokenIds = gameTokens.value.map((t) => t.id);
+  if (allTokenIds.length === 0) {
+    message.error("当前没有可用账号");
+    return;
+  }
+  if (
+    !confirm(
+      `确定将模板「${template.name}」应用到全部 ${allTokenIds.length} 个账号吗？\n这将覆盖所有账号现有的任务配置。`,
+    )
+  ) {
+    return;
+  }
+
+  let successCount = 0;
+  allTokenIds.forEach((tokenId) => {
+    const accountSettings = {
+      ...template.settings,
+      templateId: template.id,
+    };
+    localStorage.setItem(
+      `daily-settings:${tokenId}`,
+      JSON.stringify(accountSettings),
+    );
+    successCount++;
+  });
+
+  message.success(`已将模板「${template.name}」应用到全部 ${successCount} 个账号`);
+};
+
 // Template Manager Functions
 const openTemplateManagerModal = () => {
   // 加载模板列表
@@ -7694,6 +7745,12 @@ const stopBatch = () => {
   flex: 0 0 auto;
 }
 
+/* 本周十殿低于8层的账号名橙色显示 */
+.shidian-low-name {
+  color: #f97316 !important;
+  font-weight: 600;
+}
+
 .token-settings-btn {
   flex: 0 0 auto;
 }
@@ -7950,6 +8007,36 @@ const stopBatch = () => {
   height: 28px;
   color: #666;
   font-size: 14px;
+}
+
+/* 任务模板管理: 模板卡片行布局 */
+.template-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-card-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.template-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .template-card-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .template-card-actions {
+    justify-content: flex-end;
+  }
 }
 
 /* Responsive Design */

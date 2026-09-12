@@ -5,6 +5,17 @@
       <div class="page-header">
         <div class="header-content">
           <div class="header-top">
+            <!-- 控制台入口: 本页面不在 DefaultLayout 内, 用同款左滑抽屉菜单 -->
+            <n-button
+              text
+              class="console-entry-btn"
+              @click="showConsoleDrawer = true"
+            >
+              <n-icon size="16" style="margin-right: 4px">
+                <Grid />
+              </n-icon>
+              XYZW 控制台
+            </n-button>
             <img src="/icons/xiaoyugan.png" alt="XYZW" class="brand-logo" />
             <!-- 主题切换按钮 -->
             <ThemeToggle />
@@ -12,6 +23,85 @@
           <h1>游戏Token管理</h1>
         </div>
       </div>
+
+      <!-- 控制台导航抽屉: 与 DefaultLayout 移动端抽屉保持一致 -->
+      <n-drawer v-model:show="showConsoleDrawer" placement="left" :width="260">
+        <div class="drawer-menu">
+          <router-link
+            to="/admin/dashboard"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><Home /></n-icon>
+            <span>首页</span>
+          </router-link>
+          <router-link
+            to="/admin/game-features"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><Cube /></n-icon>
+            <span>游戏功能</span>
+          </router-link>
+          <router-link
+            to="/tokens"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><PersonCircle /></n-icon>
+            <span>Token管理</span>
+          </router-link>
+          <router-link
+            to="/admin/batch-daily-tasks"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><Layers /></n-icon>
+            <span>批量日常</span>
+          </router-link>
+          <router-link
+            to="/admin/batch-battle"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><GameController /></n-icon>
+            <span>批量战斗</span>
+          </router-link>
+          <router-link
+            to="/admin/PushingLevels"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><ArrowUpCircle /></n-icon>
+            <span>主线推关</span>
+          </router-link>
+          <router-link
+            to="/admin/message-test"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><ChatbubbleEllipsesSharp /></n-icon>
+            <span>消息测试</span>
+          </router-link>
+          <router-link
+            v-if="isNowInLegionWarTime()"
+            to="/admin/legion-war"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><LockOpen /></n-icon>
+            <span>实时盐场</span>
+          </router-link>
+          <router-link
+            to="/admin/profile"
+            class="drawer-item"
+            @click="showConsoleDrawer = false"
+          >
+            <n-icon><Settings /></n-icon>
+            <span>个人设置</span>
+          </router-link>
+        </div>
+      </n-drawer>
 
       <!-- 限流等待提示 -->
       <n-alert
@@ -92,25 +182,7 @@
         <div class="section-header">
           <div class="header-row-top">
             <h2>我的Token列表 ({{ tokenStore.gameTokens.length }}个)</h2>
-            <div class="header-actions">
-              <span class="multi-game-selection-count">
-                {{ isOpeningMultiGame ? "正在准备" : "已选" }}
-                {{ multiGameSelectedTokenIds.size }} 个
-              </span>
-              <n-button
-                size="small"
-                :disabled="isOpeningMultiGame"
-                @click="selectAllMultiGameTokens"
-              >
-                {{ allMultiGameTokensSelected ? "已全选" : "全选" }}
-              </n-button>
-              <n-button
-                size="small"
-                :disabled="multiGameSelectedTokenIds.size === 0 || isOpeningMultiGame"
-                @click="clearMultiGameTokenSelection"
-              >
-                清空
-              </n-button>
+            <div class="header-actions game-actions-row">
               <n-button
                 type="warning"
                 :disabled="
@@ -124,46 +196,84 @@
                     <GameController />
                   </n-icon>
                 </template>
-                批量进入游戏（{{ multiGameSelectedTokenIds.size }}）
+                批量游戏（{{ multiGameSelectedTokenIds.size }}）
               </n-button>
-              <n-tag
-                class="selected-token-tag"
-                :type="tokenStore.selectedToken ? 'success' : 'default'"
-                :bordered="true"
-                size="small"
-                round
-              >
-                {{
-                  tokenStore.selectedToken
-                    ? `已选：${tokenStore.selectedToken.name || tokenStore.selectedToken.id}`
-                    : "未选择账号"
-                }}
-              </n-tag>
               <n-button
                 type="info"
                 size="small"
                 :disabled="!tokenStore.selectedToken"
                 @click="openGame"
               >
-                打开游戏
+                单个游戏
               </n-button>
-              <n-button type="success" size="small" @click="goToDashboard">
-                批量功能
-              </n-button>
-
-              <n-button
-                v-if="!showImportForm"
-                type="primary"
-                size="small"
-                @click="showImportForm = true"
+              <!-- 十殿跳过开关: 与十殿卡片共用同一 localStorage 键, 通过本系统打开游戏时生效 -->
+              <span class="sub-divider"></span>
+              <span
+                class="skip-nightmare-toggle"
+                :class="{ active: nightmareSkipEnabled }"
+                @click="nightmareSkipEnabled = !nightmareSkipEnabled"
               >
-                添加Token
-              </n-button>
-
-              <n-dropdown :options="bulkOptions" @select="handleBulkAction">
-                <n-button size="small">批量操作</n-button>
-              </n-dropdown>
+                跳过十殿
+              </span>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-icon size="16" color="#999" style="cursor: help">
+                    <InformationCircleOutline />
+                  </n-icon>
+                </template>
+                点击文字切换开启/关闭。开启后在游戏内十殿战斗面板显示「跳过」「倍速(1倍/99倍)」按钮，需通过本系统打开游戏才生效
+              </n-tooltip>
             </div>
+          </div>
+
+          <div class="header-row-import">
+            <n-button
+              v-if="!showImportForm"
+              type="primary"
+              size="small"
+              @click="showImportForm = true"
+            >
+              添加账号
+            </n-button>
+            <n-dropdown :options="bulkOptions" @select="handleBulkAction">
+              <n-button size="small">批量操作</n-button>
+            </n-dropdown>
+            <n-tag
+              class="selected-token-tag"
+              :type="tokenStore.selectedToken ? 'success' : 'default'"
+              :bordered="true"
+              size="small"
+              round
+            >
+              {{
+                tokenStore.selectedToken
+                  ? `已选：${tokenStore.selectedToken.name || tokenStore.selectedToken.id}`
+                  : "未选择账号"
+              }}
+            </n-tag>
+          </div>
+
+          <!-- 分组选择工具条：按分组选择后批量操作只作用于所选分组 -->
+          <div v-if="tokenGroups.length" class="group-toolbar">
+            <span class="group-toolbar-label">分组：</span>
+            <button
+              v-for="group in tokenGroups"
+              :key="group.id"
+              class="group-chip"
+              :class="{ selected: selectedGroupIds.includes(group.id) }"
+              :style="groupChipStyle(group)"
+              @click="toggleGroup(group)"
+            >
+              {{ group.name }}
+            </button>
+            <template v-if="selectedGroupIds.length">
+              <span class="group-selected-count">
+                已选 {{ selectedGroupTokens.length }} 个账号
+              </span>
+              <n-button size="tiny" quaternary @click="clearGroupSelection">
+                清空选择
+              </n-button>
+            </template>
           </div>
 
           <div class="header-row-sub">
@@ -171,58 +281,38 @@
               <n-radio-button value="list">列表</n-radio-button>
               <n-radio-button value="card">卡片</n-radio-button>
             </n-radio-group>
-            <span class="sub-divider"></span>
-            <span class="sub-label">排序</span>
-            <n-button-group size="small">
-              <n-button
-                @click="toggleSort('name')"
-                :type="sortConfig.field === 'name' ? 'primary' : 'default'"
-              >
-                名称 {{ getSortIcon("name") }}
-              </n-button>
-              <n-button
-                @click="toggleSort('server')"
-                :type="sortConfig.field === 'server' ? 'primary' : 'default'"
-              >
-                服务器 {{ getSortIcon("server") }}
-              </n-button>
-              <n-button
-                @click="toggleSort('createdAt')"
-                :type="sortConfig.field === 'createdAt' ? 'primary' : 'default'"
-              >
-                创建时间 {{ getSortIcon("createdAt") }}
-              </n-button>
-              <n-button
-                @click="toggleSort('lastUsed')"
-                :type="sortConfig.field === 'lastUsed' ? 'primary' : 'default'"
-              >
-                最后使用 {{ getSortIcon("lastUsed") }}
-              </n-button>
-            </n-button-group>
+            <div class="sub-sort-group">
+              <span class="sub-label">排序</span>
+              <n-button-group size="small">
+                <n-button
+                  @click="toggleSort('name')"
+                  :type="sortConfig.field === 'name' ? 'primary' : 'default'"
+                >
+                  名称 {{ getSortIcon("name") }}
+                </n-button>
+                <n-button
+                  @click="toggleSort('server')"
+                  :type="sortConfig.field === 'server' ? 'primary' : 'default'"
+                >
+                  服务器 {{ getSortIcon("server") }}
+                </n-button>
+                <n-button
+                  @click="toggleSort('createdAt')"
+                  :type="
+                    sortConfig.field === 'createdAt' ? 'primary' : 'default'
+                  "
+                >
+                  创建时间 {{ getSortIcon("createdAt") }}
+                </n-button>
+                <n-button
+                  @click="toggleSort('lastUsed')"
+                  :type="sortConfig.field === 'lastUsed' ? 'primary' : 'default'"
+                >
+                  最后使用 {{ getSortIcon("lastUsed") }}
+                </n-button>
+              </n-button-group>
+            </div>
           </div>
-        </div>
-
-        <!-- 分组选择工具条：按分组选择后批量操作只作用于所选分组 -->
-        <div v-if="tokenGroups.length" class="group-toolbar">
-          <span class="group-toolbar-label">分组：</span>
-          <button
-            v-for="group in tokenGroups"
-            :key="group.id"
-            class="group-chip"
-            :class="{ selected: selectedGroupIds.includes(group.id) }"
-            :style="groupChipStyle(group)"
-            @click="toggleGroup(group)"
-          >
-            {{ group.name }}
-          </button>
-          <template v-if="selectedGroupIds.length">
-            <span class="group-selected-count">
-              已选 {{ selectedGroupTokens.length }} 个账号
-            </span>
-            <n-button size="tiny" quaternary @click="clearGroupSelection">
-              清空选择
-            </n-button>
-          </template>
         </div>
 
         <div class="tokens-grid" v-if="viewMode === 'card'">
@@ -737,20 +827,29 @@ import SmsLoginForm from "./smslogin.vue";
 import { useTokenStore, selectedTokenId } from "@/stores/tokenStore";
 import {
   Add,
+  ArrowUpCircle,
+  ChatbubbleEllipsesSharp,
   CloudDownload,
   CloudUpload,
   Copy,
   Create,
+  Cube,
   EllipsisHorizontal,
   GameController,
   Grid,
   Home,
+  InformationCircleOutline,
   Key,
+  Layers,
+  LockOpen,
+  PersonCircle,
   Refresh,
+  Settings,
   Star,
   SyncCircle,
   TrashBin,
 } from "@vicons/ionicons5";
+import { isNowInLegionWarTime } from "@/utils/clubBattleUtils";
 import { NIcon, NAlert, useDialog, useMessage } from "naive-ui";
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -760,7 +859,6 @@ import useIndexedDB from "@/hooks/useIndexedDB";
 import { prepareMultiGameLaunch } from "@/utils/gameLauncher";
 import {
   pruneTokenSelection,
-  selectAllTokenIds,
   toggleTokenSelection,
 } from "@/utils/gameSelection";
 import lz4 from "lz4js";
@@ -787,6 +885,7 @@ const rateLimitMessage = ref("");
 
 // 响应式数据
 const showImportForm = ref(false);
+const showConsoleDrawer = ref(false);
 const isImporting = ref(false);
 const showEditModal = ref(false);
 const importFormRef = ref(null);
@@ -801,6 +900,13 @@ const viewMode = ref(localStorage.getItem("tokenViewMode") || "list");
 const dragIndex = ref(null);
 const multiGameSelectedTokenIds = ref(new Set());
 const isOpeningMultiGame = ref(false);
+
+// 十殿跳过开关（与十殿卡片共用同一 localStorage 键，由 public/game/nightmare-skip.js 在游戏内读取）
+const NIGHTMARE_SKIP_KEY = "nightmare_skip_enabled_v1";
+const nightmareSkipEnabled = ref(localStorage.getItem(NIGHTMARE_SKIP_KEY) === "1");
+watch(nightmareSkipEnabled, (v) => {
+  localStorage.setItem(NIGHTMARE_SKIP_KEY, v ? "1" : "0");
+});
 
 // 分组选择：选中的分组ID列表，用于按分组批量操作
 const selectedGroupIds = ref([]);
@@ -935,26 +1041,12 @@ const selectedMultiGameTokens = computed(() =>
     multiGameSelectedTokenIds.value.has(token.id),
   ),
 );
-const allMultiGameTokensSelected = computed(
-  () =>
-    sortedTokens.value.length > 0 &&
-    selectedMultiGameTokens.value.length === sortedTokens.value.length,
-);
-
 function setMultiGameTokenSelected(tokenId, checked) {
   multiGameSelectedTokenIds.value = toggleTokenSelection(
     multiGameSelectedTokenIds.value,
     tokenId,
     checked,
   );
-}
-
-function selectAllMultiGameTokens() {
-  multiGameSelectedTokenIds.value = selectAllTokenIds(sortedTokens.value);
-}
-
-function clearMultiGameTokenSelection() {
-  multiGameSelectedTokenIds.value = new Set();
 }
 
 watch(
@@ -1934,10 +2026,6 @@ const formatTime = (timestamp) => {
   return new Date(timestamp).toLocaleString("zh-CN");
 };
 
-const goToDashboard = () => {
-  router.push("/admin/batch-daily-tasks");
-};
-
 // ============ BIN 格式转换（来自 convertBin.mjs） ============
 
 function extractKey(bytes) {
@@ -2243,6 +2331,49 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
+/* 控制台入口: 固定在头部左侧 */
+.console-entry-btn {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--border-radius-medium, 8px);
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.console-entry-btn:hover {
+  background: rgba(255, 255, 255, 0.32) !important;
+  color: #fff !important;
+}
+
+/* 控制台导航抽屉: 与 DefaultLayout 保持一致 */
+.drawer-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+}
+
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--border-radius-medium);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.drawer-item.router-link-active {
+  background: var(--primary-color-light);
+  color: var(--primary-color);
+}
+
 .brand-logo {
   width: 64px;
   height: 64px;
@@ -2453,6 +2584,31 @@ onUnmounted(() => {
 .header-row-sub {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  /* 抵消 section-header 水平内边距, 让视图切换/排序贴近卡片左右边缘; 保留少量内边距避免顶死 */
+  width: calc(100% + 2 * var(--spacing-xl));
+  margin-left: calc(-1 * var(--spacing-xl));
+  margin-right: calc(-1 * var(--spacing-xl));
+  padding-left: var(--spacing-md);
+  padding-right: var(--spacing-md);
+}
+
+/* 视图切换居左, 排序等靠右 */
+.sub-sort-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  /* auto 外边距: 即使换行也保持贴右 */
+  margin-left: auto;
+}
+
+/* 添加账号 + 批量操作 行 */
+.header-row-import {
+  display: flex;
+  align-items: center;
   gap: var(--spacing-sm);
   flex-wrap: wrap;
 }
@@ -2468,6 +2624,21 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--text-secondary, #667085);
   white-space: nowrap;
+}
+
+/* 跳过十殿: 可点击文字开关 (绿=启用, 灰=停用) */
+.skip-nightmare-toggle {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  color: #9aa0a6;
+  transition: color 0.2s;
+}
+
+.skip-nightmare-toggle.active {
+  color: #18a058;
 }
 
 .header-actions {
@@ -2488,12 +2659,6 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.multi-game-selection-count {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
-}
-
 .multi-game-token-checkbox {
   display: inline-flex;
   align-items: center;
@@ -2506,9 +2671,7 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 2px 0 8px;
-  border-bottom: 1px solid var(--border-light, #e4e7ec);
-  margin-bottom: 10px;
+  padding: 2px 0;
 }
 
 .group-toolbar-label {
@@ -2944,7 +3107,15 @@ onUnmounted(() => {
   }
 
   .header-row-sub {
-    justify-content: center;
+    width: calc(100% + 2 * var(--spacing-md));
+    margin-left: calc(-1 * var(--spacing-md));
+    margin-right: calc(-1 * var(--spacing-md));
+  }
+
+  .header-row-import :deep(.n-button) {
+    flex: 1 1 auto;
+    min-height: 38px;
+    font-size: 13px;
   }
 
   .header-row-sub :deep(.n-button) {

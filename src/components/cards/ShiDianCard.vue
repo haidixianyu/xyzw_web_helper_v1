@@ -366,78 +366,79 @@ const getTeamId = async () => {
   return Number(teamId);
 };
 
-// 递归查找"成员数组"：父级键名含 member/player/role 且元素带 roleId/id/uid 的数组
-const deepFindMemberArray = (obj, depth = 0) => {
-  if (!obj || typeof obj !== "object" || depth > 6) return null;
-  for (const [k, v] of Object.entries(obj)) {
-    if (Array.isArray(v)) {
-      const keyOk = /member|player|role/i.test(k) && !/apply/i.test(k);
-      const looksMembers =
-        v.length > 0 &&
-        v.every(
-          (it) =>
-            it && typeof it === "object" &&
-            (it.roleId ?? it.id ?? it.uid ?? it.userId) !== undefined,
-        );
-      if (keyOk && looksMembers) return v;
-    } else if (v && typeof v === "object") {
-      const r = deepFindMemberArray(v, depth + 1);
-      if (r) return r;
-    }
+// 确保账号已连接；返回 { connected, wasConnected }
+// wasConnected=false 表示本次新建的连接，查询结束后应关闭以释放连接锁
+const ensureAccountConnected = async (tokenId, timeout = 15000) => {
+  if (tokenStore.getWebSocketStatus(tokenId) === "connected") {
+    return { connected: true, wasConnected: true };
   }
-  return null;
+  const acc = gameTokens.value.find((t) => t.id === tokenId);
+  if (!acc?.token) return { connected: false, wasConnected: false };
+  tokenStore.createWebSocketConnection(tokenId, acc.token, acc.wsUrl);
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const st = tokenStore.getWebSocketStatus(tokenId);
+    if (st === "connected") return { connected: true, wasConnected: false };
+    if (st === "error" || st === "disconnected") {
+      // 可能仍在重连中，继续短暂等待
+    }
+    await sleep(300);
+  }
+  return { connected: false, wasConnected: false };
 };
 
-// 拉取当前十殿房间成员（单次查询，从队伍信息响应中解析成员，不逐账号轮询）
-// 返回成员选项数组；未找到队伍或成员列表时返回 null
-const fetchRoomMembers = async () => {
-  const roleId = await getRoleId();
-  const mine = await tokenStore.sendMessageWithPromise(
-    token.value.id,
-    "matchteam_getroleteaminfo",
-    { roleID: parseInt(roleId) },
-    12000,
-  );
-  const myTeams = mine?.roleMTData?.gDMTData || {};
-  // 十殿队伍：优先 teamCfgId===7（十殿配置），否则非 cfg1 的队伍，再退化为全部
-  const myKeys = Object.keys(myTeams);
-  const sDianTeamKey =
-    myKeys.find((k) => Number(myTeams[k]?.teamCfgId) === 7) ||
-    myKeys.find((k) => Number(myTeams[k]?.teamCfgId) !== 1) ||
-    (myKeys.length ? myKeys[0] : "");
-  if (!sDianTeamKey) return null;
-  const team = myTeams[sDianTeamKey] || {};
-  // 优先常见字段名，找不到则递归深度查找
-  const rawMembers =
-    team.members || team.memberList || team.roleList ||
-    team.teamInfo?.members || team.teamInfo?.memberList ||
-    team.teamData?.members || null;
-  const memberArr = Array.isArray(rawMembers) && rawMembers.length
-    ? rawMembers
-    : deepFindMemberArray(team);
-  if (!memberArr) {
-    // 调试输出：打印响应结构，便于对准服务器真实字段名
-    addLog(`队伍对象键: ${Object.keys(team).join(",") || "(空)"}`, "warning");
-    try {
-      addLog(`队伍对象内容: ${JSON.stringify(team).slice(0, 800)}`, "warning");
-    } catch (e) { /* 序列化失败忽略 */ }
-    return null;
-  }
-  const memberRoleIds = memberArr
-    .map((m) => String(m?.roleId ?? m?.id ?? m?.uid ?? m?.userId ?? m ?? ""))
-    .filter(Boolean);
-  if (!memberRoleIds.length) return null;
-  // 将成员 roleId 映射回本系统账号（账号名/ID 末尾数字即 roleId），映射不到的直接以 roleId 展示
-  return memberRoleIds.map((rid, i) => {
-    const t = gameTokens.value.find(
-      (acc) => extractRoleId(acc.name) === rid || extractRoleId(acc.id) === rid || String(acc.id) === rid,
-    );
-    if (t) {
-      return { label: `${t.name}${t.server ? `(${t.server})` : ""}${t.id === token.value?.id ? "（房主）" : ""}`, value: t.id };
+// 通过接口轮询获取房间成员：
+// 服务器没有"按队伍号查成员"的指令，但每个账号自己的
+// matchteam_getroleteaminfo 响应中 gDMTData 的键 = 该账号当前所在的队伍号。
+// 因此逐个账号查询，凡 gDMTData 含目标房间号者即为在队成员。
+// 并发受限（每次最多 4 个），本次新建的连接查询后自动关闭。
+const MEMBER_POLL_CONCURRENCY = 4;
+const fetchRoomMembers = async (roomId) => {
+  const roomKey = String(roomId || "");
+  if (!roomKey || roomKey === "0") return null;
+  const candidates = gameTokens.value.filter((t) => t.token);
+  const results = [];
+  const queue = [...candidates];
+  const workers = Array.from({ length: Math.min(MEMBER_POLL_CONCURRENCY, queue.length) }, async () => {
+    while (queue.length) {
+      const acc = queue.shift();
+      if (!acc) break;
+      let conn = null;
+      try {
+        conn = await ensureAccountConnected(acc.id);
+        if (!conn.connected) {
+          results.push({ acc, inRoom: false, error: "连接失败" });
+          continue;
+        }
+        const roleId = extractRoleId(acc.name) || extractRoleId(acc.id);
+        const res = await tokenStore.sendMessageWithPromise(
+          acc.id,
+          "matchteam_getroleteaminfo",
+          { roleID: parseInt(roleId) },
+          10000,
+        );
+        const teamKeys = Object.keys(res?.roleMTData?.gDMTData || {});
+        results.push({ acc, inRoom: teamKeys.includes(roomKey) });
+      } catch (e) {
+        results.push({ acc, inRoom: false, error: String(e?.message || e) });
+      } finally {
+        // 本次新建的连接用完即关，避免长期占用连接锁
+        if (conn && !conn.wasConnected) {
+          try { tokenStore.closeWebSocketConnection(acc.id); } catch (e) {}
+        }
+      }
     }
-    const nm = memberArr[i]?.roleName || memberArr[i]?.name || "";
-    return { label: nm ? `${nm}（roleId ${rid}）` : `roleId ${rid}（未导入）`, value: rid };
   });
+  await Promise.all(workers);
+  const inRoom = results.filter((r) => r.inRoom);
+  const failed = results.filter((r) => r.error);
+  if (failed.length) {
+    addLog(`成员轮询完成：${inRoom.length} 人在队，${failed.length} 个账号查询失败（${failed.map((f) => f.acc.name).join("、")}）`, "warning");
+  }
+  return inRoom.map(({ acc }) => ({
+    label: `${acc.name}${acc.server ? `(${acc.server})` : ""}${acc.id === token.value?.id ? "（房主）" : ""}`,
+    value: acc.id,
+  }));
 };
 
 // 「刷新房间成员」按钮：拉取并提示
@@ -445,11 +446,28 @@ const refreshRoomMembers = async () => {
   if (!ensureToken()) return;
   busy.value = "roomMembers";
   try {
-    const members = await fetchRoomMembers();
-    if (!members) {
+    // 房间号：优先用已缓存的房间号/队伍号，取不到则实时读取
+    let roomId = Number(info.value.roomId) || Number(info.value.teamId);
+    if (!roomId) {
+      try {
+        const roleId = await getRoleId();
+        const stats = parseNightmareStats(await getNightmareInfo(roleId));
+        info.value = { ...info.value, ...stats };
+        roomId = Number(stats.roomId) || Number(stats.teamId);
+      } catch (e) { /* 忽略，下面按无房间号处理 */ }
+    }
+    if (!roomId) {
       roomMembers.value = [];
-      addLog("未能从队伍信息中读取成员列表，出战下拉将使用账号列表", "warning");
-      message.warning("未能读取房间成员列表（未组队或响应无成员字段）");
+      addLog("当前不在十殿房间（房间号为空），出战下拉将使用账号列表", "warning");
+      message.warning("当前不在十殿房间，请先创建/加入房间");
+      return;
+    }
+    addLog(`正在轮询 ${gameTokens.value.length} 个账号，检查谁在房间 ${roomId} 内...`);
+    const members = await fetchRoomMembers(roomId);
+    if (!members || !members.length) {
+      roomMembers.value = [];
+      addLog(`未检测到在房间 ${roomId} 内的账号，出战下拉将使用账号列表`, "warning");
+      message.warning("未检测到房间成员（可能成员账号未导入或均不在房间）");
       return;
     }
     roomMembers.value = members;
@@ -478,19 +496,6 @@ const refreshInfo = async () => {
     addLog(
       `十殿信息获取成功：层数${info.value.nightmareLevel}层，转盘${info.value.turntableLeftCnt}次，枕头${info.value.pillowCount}，房间号${info.value.roomId}，当前殿级${info.value.currentLevel}`,
     );
-    // 同步刷新房间成员（尽力而为，失败不影响信息展示）
-    try {
-      const members = await fetchRoomMembers();
-      if (members) {
-        roomMembers.value = members;
-        addLog(`房间成员：${members.map((m) => m.label).join("、")}`);
-      } else {
-        roomMembers.value = [];
-        addLog("未读取到房间成员列表，出战下拉暂用账号列表", "warning");
-      }
-    } catch (e) {
-      addLog(`读取房间成员失败: ${e?.message || e}`, "warning");
-    }
     message.success("十殿信息获取成功");
   } catch (e) {
     handleErr("刷新信息", e);

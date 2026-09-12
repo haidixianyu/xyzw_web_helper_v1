@@ -290,7 +290,7 @@
       [0, 200, 500, 1000, 1500, 2000].forEach(function (delay) {
         setTimeout(function () { syncAll(panel); }, delay);
       });
-      if (panel.battleUIData) startKeepAlive(panel);
+      startKeepAlive(panel);
     }
 
     proto.onShow = function () {

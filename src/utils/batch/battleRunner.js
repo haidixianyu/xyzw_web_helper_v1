@@ -32,6 +32,37 @@ const FREE_REVIVE_MAX = 5;
 const RECRUIT_TIMEOUT_SECONDS = 60;
 
 /**
+ * 等待战斗通道就绪: 已连接立即返回 true; 否则主动重连并接管 onConnect 等待恢复,
+ * 超时返回 false。接管期间会保存并恢复 battleClient.onConnect(connectBattleChannel 用它 resolve)。
+ * 目的: 发送 war_getbattlefieldinfo 前确保通道已连, 否则请求会滞留发送队列直至重连,
+ * 而 waitForBattleInfo 的独立计时已先行超时(导致"获取战场地图超时"反复出现)。
+ */
+function waitForBattleConnected(battleClient, timeoutMs = 6000) {
+  if (battleClient.connected) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    const prevOnConnect = battleClient.onConnect;
+    battleClient.onConnect = (...args) => {
+      clearTimeout(timer);
+      battleClient.onConnect = prevOnConnect;
+      if (typeof prevOnConnect === "function") {
+        try {
+          prevOnConnect(...args);
+        } catch (_) {}
+      }
+      resolve(true);
+    };
+    try {
+      battleClient.reconnect();
+    } catch (_) {
+      clearTimeout(timer);
+      battleClient.onConnect = prevOnConnect;
+      resolve(false);
+    }
+  });
+}
+
+/**
  * 等待 battle 通道的 war_getbattlefieldinfo 响应, 返回战场原始数据
  */
 function waitForBattleInfo(battleClient, timeoutMs = 10000) {
@@ -267,7 +298,21 @@ function pickFollowTarget(battlefield, followRoleIds) {
  * 刷新战场快照(发 war_getbattlefieldinfo 并等响应), 返回 new battlefield 数据或 null
  */
 async function refreshBattlefieldInfo(battleClient, battlefieldId, timeoutMs = 8000, addLog) {
-  const infoPromise = waitForBattleInfo(battleClient, timeoutMs);
+  // 发送前确保通道已连接: 否则 war_getbattlefieldinfo 会滞留发送队列, 等重连成功才发出,
+  // 而 waitForBattleInfo 已先行超时(通道断线重连导致反复"获取战场地图超时")。
+  const ready = await waitForBattleConnected(
+    battleClient,
+    Math.min(timeoutMs, 6000),
+  );
+  if (!ready) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `刷新战场信息失败: 战斗通道未连接(重连超时)`,
+      type: "warn",
+    });
+    return null;
+  }
+  const infoPromise = waitForBattleInfo(battleClient, Math.max(timeoutMs, 12000));
   battleClient.send("war_getbattlefieldinfo", { battlefieldId });
   try {
     const raw = await infoPromise;
@@ -278,6 +323,12 @@ async function refreshBattlefieldInfo(battleClient, battlefieldId, timeoutMs = 8
       message: `刷新战场信息失败: ${error.message}`,
       type: "warn",
     });
+    // 通道可能已断开, 触发重连以便下次刷新恢复
+    if (!battleClient.connected) {
+      try {
+        battleClient.reconnect();
+      } catch (_) {}
+    }
     return null;
   }
 }
@@ -342,13 +393,16 @@ async function resolveBattleTeam(options, tokenId, tokenStore, name, addLog) {
         {},
         8000,
       );
-      const raw = legionRes?.body?.info?.members || legionRes?.info?.members || {};
+      const raw =
+        legionRes?.body?.info?.members || legionRes?.info?.members || {};
       const list = Array.isArray(raw) ? raw : Object.values(raw || {});
-      const offline = list.filter((m) => !m.isOnline);
-      const team = offline.map((m) => Number(m.roleId)).filter((id) => id > 0);
+      // 注意: legion_getinfo 的 members 不带实时在线状态(isOnline 恒不可靠),
+      // 真正在线可参战成员需从战场快照 battlefield.roles[].isOnline 判断。
+      // 这里只取全体俱乐部成员 roleId 作为候选, 实际招募时再按战场快照筛选在线队友。
+      const team = list.map((m) => Number(m.roleId)).filter((id) => id > 0);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${name} 俱乐部未上线成员 ${offline.length} 人, 拉取为战斗队伍`,
+        message: `${name} 俱乐部候选成员 ${team.length} 人(在线状态以战场快照为准)`,
         type: "info",
       });
       return team;
@@ -402,7 +456,19 @@ async function getBattleFormation(tokenId, tokenStore, name, addLog) {
     });
     return null;
   }
-  return { battleTeam, lordWeaponId: Number(role?.lordWeaponId || 0) };
+  const petUId = String(
+    role?.petUId ??
+      role?.pet?.petUId ??
+      role?.pet?.uId ??
+      role?.petId ??
+      role?.pet?.petId ??
+      "",
+  );
+  return {
+    battleTeam,
+    lordWeaponId: Number(role?.lordWeaponId || 0),
+    petUId,
+  };
 }
 
 /** 计算还需等待多少毫秒才能以免费复活 (0 表示已就绪) */
@@ -454,19 +520,13 @@ function connectBattleChannel({ token, sid, battlefieldId, addLog, workerSleep, 
       addLog({ time: new Date().toLocaleTimeString(), message: "战斗通道已连接", type: "success" });
       await workerSleep(commandDelay);
 
-      // 进入战场
-      addLog({ time: new Date().toLocaleTimeString(), message: "发送进入战场...", type: "info" });
-      client.send("war_enterbattlefield", {
-        battlefieldId,
-        useGzip: true,
-      });
-      await workerSleep(commandDelay);
-
+      // 不在连接时立即进场: 进场必须排在「布阵 -> 组队」之后(见 runSaltFieldBattle 主流程)
       resolve(client);
     };
 
     client.onError = (error) => {
       clearTimeout(timeout);
+      client.disconnect();
       reject(new Error(`战斗通道错误: ${error?.message || error}`));
     };
 
@@ -509,6 +569,8 @@ export function fetchSaltBattlefieldSnapshot({
       try {
         const infoPromise = waitForBattleInfo(client, timeoutMs);
         client.send("war_enterbattlefield", { battlefieldId, useGzip: true });
+        // 必须主动请求战场快照, 否则服务端不会下发 war_getbattlefieldinfo 响应
+        client.send("war_getbattlefieldinfo", { battlefieldId });
         const raw = await infoPromise;
         finish(resolve, raw?.battlefield || null);
       } catch (error) {
@@ -541,6 +603,9 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
   const shouldStop = deps.shouldStop || (() => false);
   const name = accountName(token) || tokenId;
 
+  // 战斗通道连接, 在 finally 中务必断开, 否则停止/结束后仍会持续收到战场推送(ProtoMsg 刷屏)
+  let battleClient = null;
+
   try {
     const { gameTokens } = tokenStore || {};
     const tokenList = Array.isArray(gameTokens) ? gameTokens : [];
@@ -565,8 +630,8 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
       type: "info",
     });
 
-    // 2. 建立战斗通道并进场
-    const battleClient = await connectBattleChannel({
+    // 2. 建立战斗通道(不自动进场)
+    battleClient = await connectBattleChannel({
       token: token.token,
       sid,
       battlefieldId,
@@ -575,32 +640,93 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
       commandDelay,
     });
 
-    // 3. 拉取地图(获取战场快照)
-    addLog({ time: new Date().toLocaleTimeString(), message: `${name} 拉取战场地图...`, type: "info" });
-    const initialBf = await refreshBattlefieldInfo(
-      battleClient,
-      battlefieldId,
-      8000,
-      addLog,
-    ).catch(() => null);
-    if (initialBf) {
-      const roleCnt = Object.keys(initialBf.roles || {}).length;
-      const bldCnt = Object.keys(initialBf.buildingData || {}).length;
+    // 2.1 记录战斗通道响应报文, 用于核对判断依据(角色 state/energy/revive/isOnline 等字段)。
+    //     盐场仅在周六 20:00-21:00 开放, 无法即时复现问题, 故保留详细日志供事后分析。
+    let selfRoleId = null;
+    try {
+      const ri = await tokenStore.sendMessageWithPromise(tokenId, "role_getroleinfo", {}, 10000);
+      selfRoleId = ri?.role?.roleId ?? null;
+    } catch (_) {}
+    battleClient.setMessageListener((packet) => {
+      try {
+        const cmd = packet?.cmd;
+        if (!cmd || cmd === "war_ping" || cmd === "heart_beat") return;
+        const body =
+          packet?.decodedBody !== undefined
+            ? packet.decodedBody
+            : packet?.rawData !== undefined
+              ? packet.rawData
+              : packet?.body;
+        if (body == null) return;
+        const code = packet?.code;
+        const ts = new Date().toLocaleTimeString();
+        if (cmd === "war_getbattlefieldinfo") {
+          const bf = body?.battlefield ?? body;
+          const roles = bf?.roles
+            ? Object.values(bf.roles)
+            : Array.isArray(body?.roles)
+              ? body.roles
+              : [];
+          const buildings = bf?.buildingData ? Object.values(bf.buildingData) : [];
+          const marches = bf?.marches ? Object.values(bf.marches) : [];
+          const sample = roles[0];
+          addLog({
+            time: ts,
+            message: `📨 [${name}] 战场快照 code=${code ?? "?"} roles=${roles.length} buildings=${buildings.length} marches=${marches.length}\n示例role完整字段: ${sample ? JSON.stringify(sample).slice(0, 1000) : "无"}`,
+            type: "info",
+          });
+          const roleList = roles
+            .map((r) => {
+              const me = String(r?.id) === String(selfRoleId) ? "★自己 " : "";
+              return `${me}id=${r?.id} st=${r?.state} en=${r?.energy} rv=${r?.revive} on=${r?.isOnline} lg=${r?.legionID ?? r?.legionId}`;
+            })
+            .join(" | ");
+          addLog({
+            time: ts,
+            message: `[${name}] 战场角色列表: ${roleList.slice(0, 1800)}`,
+            type: "info",
+          });
+        } else {
+          let bodyStr;
+          try {
+            bodyStr = JSON.stringify(body);
+          } catch {
+            bodyStr = String(body);
+          }
+          const TRUNC = 2500;
+          const shown =
+            bodyStr.length > TRUNC
+              ? bodyStr.slice(0, TRUNC) + `…(截断共${bodyStr.length}字符)`
+              : bodyStr;
+          addLog({
+            time: ts,
+            message: `📨 [${name}] 响应[${cmd}] code=${code ?? "?"} ${shown}`,
+            type: "info",
+          });
+        }
+      } catch (_) {}
+    });
+
+    // 3. 布阵参赛: 取角色自身正常阵容(含宠物)后 war_setbattleteam, 必须在「组队」「进场」之前。
+    //    注意: 进场后阵容锁定不可再改; 宠物必须从角色自身配置获取。
+    const formation = await getBattleFormation(tokenId, tokenStore, name, addLog);
+    if (formation) {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${name} 战场快照: 角色 ${roleCnt} 个, 建筑 ${bldCnt} 个`,
+        message: `${name} 设置出战阵容 (${formation.battleTeam.size} 槽位, 武器 ${formation.lordWeaponId}, 宠物 ${formation.petUId || "无"})`,
         type: "info",
       });
-    } else {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `${name} 首次战场快照获取失败, 继续后续流程`,
-        type: "warn",
+      battleClient.send("war_setbattleteam", {
+        battlefieldId,
+        battleTeam: formation.battleTeam,
+        lordWeaponId: formation.lordWeaponId,
+        petUId: formation.petUId,
       });
+      await sleep(commandDelay);
     }
 
     // 4. 解析招募名单(俱乐部成员 roleId, 用于 war_invitejointeam 邀请入队):
-    //    teamMode=random: 拉取该账号俱乐部未上线成员;
+    //    teamMode=random: 拉取该账号俱乐部成员候选;
     //    teamMode=specified: 使用页面勾选的成员 roleId 列表
     const team = await resolveBattleTeam(
       options,
@@ -609,23 +735,6 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
       name,
       addLog,
     );
-
-    // 4.5 设置本账号出战阵容: war_setbattleteam 载荷为 {battlefieldId, battleTeam: Map<槽位,heroId>, lordWeaponId},
-    //     使用该账号在 role_getroleinfo 中已有的默认阵容(角色当前配置), 而非俱乐部成员ID
-    const formation = await getBattleFormation(tokenId, tokenStore, name, addLog);
-    if (formation) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `${name} 设置出战阵容 (${formation.battleTeam.size} 槽位, 武器 ${formation.lordWeaponId})`,
-        type: "info",
-      });
-      battleClient.send("war_setbattleteam", {
-        battlefieldId,
-        battleTeam: formation.battleTeam,
-        lordWeaponId: formation.lordWeaponId,
-      });
-      await sleep(commandDelay);
-    }
 
     // 5.4 手动行军到坐标(可选, 兼容旧配置); 自动攻击由 5.3 完成
     // 5. 主战斗循环:
@@ -642,11 +751,56 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
       });
 
       // 5.1 招募队友(每轮重新邀请)
+      // 在线可参战成员以战场快照为准: 从 battlefield.roles 筛同军团且 isOnline 的角色
       if (team && team.length > 0) {
+        let teamForRound = team;
+        try {
+          const bf = await refreshBattlefieldInfo(
+            battleClient,
+            battlefieldId,
+            8000,
+            addLog,
+          );
+          if (bf) {
+            const selfRole = await getSelfRole(bf, tokenId, tokenStore);
+            const selfLegionId =
+              selfRole?.legionID || selfRole?.legionId || null;
+            const selfId = Number(selfRole?.id);
+            const onlineMates = Object.values(bf.roles || {})
+              .filter(
+                (r) =>
+                  Number(r?.id) > 0 &&
+                  r?.legionID === selfLegionId &&
+                  r?.isOnline &&
+                  Number(r?.id) !== selfId,
+              )
+              .map((r) => Number(r.id));
+            if (onlineMates.length > 0) {
+              teamForRound = onlineMates;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${name} 战场快照筛得同军团在线队友 ${onlineMates.length} 人, 仅邀请在线队友`,
+                type: "info",
+              });
+            } else {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${name} 战场快照未筛得在线队友, 退回邀请全体候选 ${team.length} 人`,
+                type: "info",
+              });
+            }
+          }
+        } catch (error) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 招募阶段准备队友名单异常: ${error.message}`,
+            type: "warn",
+          });
+        }
         await recruitTeam(
           battleClient,
           battlefieldId,
-          team,
+          teamForRound,
           shouldStop,
           sleep,
           commandDelay,
@@ -658,10 +812,46 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
       // 5.2 进场战斗: 发送 war_enterbattlefield, 激活本账号在该战场的战斗状态
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${name} 进场战斗...`,
+        message: `${name} 发送进入战场命令 war_enterbattlefield`,
         type: "info",
       });
-      battleClient.send("war_enterbattlefield", { battlefieldId });
+      battleClient.send("war_enterbattlefield", { battlefieldId, useGzip: true });
+      // 等待进场确认: 轮询战场快照, 确认自己角色已进入战场(出现在 roles 中)
+      let entered = false;
+      for (let i = 0; i < 6 && !entered && !shouldStop(); i++) {
+        await sleep(1000);
+        const bfChk = await refreshBattlefieldInfo(
+          battleClient,
+          battlefieldId,
+          8000,
+          addLog,
+        );
+        if (bfChk) {
+          const sr = await getSelfRole(bfChk, tokenId, tokenStore);
+          if (sr) {
+            entered = true;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${name} 已进入战场(角色ID ${sr.id}, state=${sr.state})`,
+              type: "success",
+            });
+          }
+        }
+        if (!entered) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 进场确认中(${i + 1}/6)...`,
+            type: "warn",
+          });
+        }
+      }
+      if (!entered) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 进场确认失败(战斗通道不稳定或未真正进场), 本轮跳过自动行军/攻击`,
+          type: "error",
+        });
+      }
       await sleep(commandDelay);
 
       // 5.3 自动攻击/自动行军: 刷战场快照 -> 自动检测敌人/建筑/目标并行动
@@ -679,6 +869,14 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
           const selfRole = await getSelfRole(battlefield, tokenId, tokenStore);
           const selfLegionId =
             selfRole?.legionID || selfRole?.legionId || null;
+
+          if (!selfRole) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${name} 未检测到自己在战场中的角色(未进场), 跳过本轮自动行军/攻击`,
+              type: "warn",
+            });
+          } else {
 
           // 5.3a 自动行军: 打开后按策略选择目标并 war_startmarch
           if (options.autoMarch) {
@@ -861,6 +1059,7 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
             message: `${name} 第${loopCount}轮行动统计: 攻击 ${roundAttacks} 次, 行军 ${roundMarches} 次, 加速 ${roundSpeedUps} 次`,
             type: "info",
           });
+          }
         } else {
           addLog({ time: new Date().toLocaleTimeString(), message: `${name} 战场信息获取失败, 跳过本轮自动攻击/行军`, type: "warn" });
         }
@@ -971,5 +1170,11 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
       type: "error",
     });
     return { success: false, error: error.message };
+  } finally {
+    if (battleClient) {
+      try {
+        battleClient.disconnect();
+      } catch (_) {}
+    }
   }
 }
