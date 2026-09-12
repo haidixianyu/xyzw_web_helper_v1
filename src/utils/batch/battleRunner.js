@@ -222,16 +222,43 @@ function pickNearToFarTarget(battlefield, selfRole, selfLegionId) {
 }
 
 /**
- * 自动行军策略-跟随: 从战场 marches 中找出选中成员(roleId 列表)当前的行军,
- * 有多个时随机选一个, 返回其行军目标坐标 {x,y} 或 null
+ * 自动行军策略-跟随: 从战场 marches 中找出选中成员当前的行军。
+ * followRoleIds 可为 roleId 数组, 也可为 [{id, power}] 数组(带战力);
+ * 多人同时行军时跟随战力最高的, 战力信息缺失时随机选一个。
+ * 返回目标坐标 {x,y} 或 null
  */
 function pickFollowTarget(battlefield, followRoleIds) {
   if (!battlefield?.marches || !followRoleIds?.length) return null;
-  const ids = new Set(followRoleIds.map(Number));
+  const powerMap = new Map();
+  const ids = new Set();
+  for (const item of followRoleIds) {
+    if (item && typeof item === "object") {
+      const id = Number(item.id ?? item.roleId);
+      if (!Number.isFinite(id)) continue;
+      ids.add(id);
+      powerMap.set(id, Number(item.power) || 0);
+    } else {
+      const id = Number(item);
+      if (Number.isFinite(id)) ids.add(id);
+    }
+  }
   const marches = valuesOf(battlefield.marches).filter(
     (m) => m?.to && ids.has(Number(m?.roleId)),
   );
   if (marches.length === 0) return null;
+  if (marches.length === 1) return marches[0].to;
+  const hasPower = marches.some(
+    (m) => (powerMap.get(Number(m.roleId)) || 0) > 0,
+  );
+  if (hasPower) {
+    // 跟随战力最高的正在行军的成员
+    marches.sort(
+      (a, b) =>
+        (powerMap.get(Number(b.roleId)) || 0) -
+        (powerMap.get(Number(a.roleId)) || 0),
+    );
+    return marches[0].to;
+  }
   const pick = marches[Math.floor(Math.random() * marches.length)];
   return pick.to;
 }

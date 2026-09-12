@@ -81,6 +81,19 @@
                 </n-icon>
                 {{ isAccountListCollapsed ? `展开 (${signedTokens.length})` : "收起" }}
               </button>
+              <button
+                class="btn btn-sm btn-default connect-toggle"
+                :disabled="isRunning || batchConnecting || selectedTokens.length === 0"
+                title="提前连接所有勾选的账号，之后设置跟随/开始战斗就不用再等建连"
+                @click="connectSelectedAccounts"
+              >
+                <span v-if="batchConnecting" class="btn-spinner"></span>
+                {{
+                  batchConnecting
+                    ? `连接中 ${batchConnectProgress.done}/${batchConnectProgress.total}`
+                    : "连接选中"
+                }}
+              </button>
 
               <div class="group-toolbar">
                 <button
@@ -130,6 +143,21 @@
                     <span class="ui-checkbox-box"></span>
                   </label>
                   <span class="roster-name">{{ getDisplayName(token) }}</span>
+                  <button
+                    class="roster-follow-btn"
+                    :class="{ 'has-members': (perAccountFollow[token.id] || []).length }"
+                    :disabled="isRunning"
+                    :title="
+                      (perAccountFollow[token.id] || []).length
+                        ? '跟随: ' +
+                          perAccountFollow[token.id].map((m) => m.name).join('、') +
+                          '（点击修改）'
+                        : '设置跟随人员（读取本俱乐部成员）'
+                    "
+                    @click.stop="openFollowPickerFor(token)"
+                  >
+                    跟随{{ (perAccountFollow[token.id] || []).length ? '(' + perAccountFollow[token.id].length + ')' : '' }}
+                  </button>
                   <span
                     class="roster-status"
                     :class="'roster-status--' + getStatusType(token.id)"
@@ -267,25 +295,22 @@
                     class="form-row"
                   >
                     <span class="form-label">跟随队员</span>
-                    <div
-                      class="member-input"
-                      :class="{ 'is-disabled': isRunning }"
-                      @click="openFollowPicker"
-                    >
-                      <template v-if="followedMembers.length">
-                        <span
-                          v-for="m in followedMembers"
-                          :key="m.roleId"
-                          class="chip chip--closable"
-                          @click.stop="removeFollowMember(m.roleId)"
-                        >
-                          {{ m.name }}
-                          <span class="chip-close">×</span>
-                        </span>
-                      </template>
-                      <span v-else class="member-input-placeholder">
-                        点击选择要跟随的俱乐部成员（可多选）
-                      </span>
+                    <div class="follow-per-account">
+                      <div class="form-hint">
+                        在上方「账号列表」每个账号右侧点「跟随」单独设置，
+                        每个账号读取本俱乐部的成员；未设置的账号不跟随。
+                        <template v-if="followConfiguredCount > 0">
+                          已配置 {{ followConfiguredCount }} 个账号。
+                          <button
+                            class="btn btn-sm btn-default"
+                            style="margin-left: 8px"
+                            :disabled="isRunning"
+                            @click="perAccountFollow = {}"
+                          >
+                            清空全部
+                          </button>
+                        </template>
+                      </div>
                     </div>
                   </div>
 
@@ -701,7 +726,15 @@
     >
       <div class="ui-modal">
         <div class="ui-modal-header">
-          <h3>{{ pickerTitle }}</h3>
+          <div class="picker-header-title">
+            <h3>{{ pickerTitle }}</h3>
+            <p
+              v-if="memberPickerMode === 'follow' && pickerSelectedText"
+              class="picker-selected-names"
+            >
+              已选：{{ pickerSelectedText }}
+            </p>
+          </div>
           <button
             class="ui-modal-close"
             @click="showMemberPicker = false"
@@ -718,11 +751,18 @@
           <div v-else-if="clubLoadError" class="ui-alert ui-alert--error">
             {{ clubLoadError }}
           </div>
-          <div v-else-if="clubMembers.length === 0" class="ui-empty">
+          <div v-else-if="currentPickerMembers.length === 0" class="ui-empty">
             暂无俱乐部成员
           </div>
           <template v-else>
-            <div class="picker-hint">点击行勾选成员，最多 {{ pickerLimit }} 名</div>
+            <div class="picker-hint">
+              <span>点击行勾选成员，最多 {{ pickerLimit }} 名</span>
+              <span v-if="pickerSourceDisplay" class="picker-source">
+                来源：{{ pickerSourceDisplay }}（{{
+                  memberPickerMode === "follow" ? "本账号所在俱乐部" : "顶部导航当前账号"
+                }}）
+              </span>
+            </div>
             <div class="member-table-wrap">
               <table class="ui-table">
                 <thead>
@@ -736,7 +776,7 @@
                 </thead>
                 <tbody>
                   <tr
-                    v-for="m in clubMembers"
+                    v-for="m in currentPickerMembers"
                     :key="m.roleId"
                     class="member-row"
                     :class="{ selected: draftMemberIds.includes(m.roleId) }"
@@ -781,7 +821,10 @@
         <div class="ui-modal-footer">
           <button
             class="btn btn-sm"
-            :disabled="isRunning || !sourceTokenId"
+            :disabled="
+              isRunning ||
+              (memberPickerMode === 'follow' ? !pickerTokenId : !sourceTokenId)
+            "
             @click="reloadClubMembers"
           >
             <span v-if="loadingMembers" class="btn-spinner"></span>
@@ -1236,6 +1279,63 @@ const connectionManager = createConnectionManager({
   addLog,
 });
 
+// ===== 预连接选中账号 =====
+const batchConnecting = ref(false);
+const batchConnectProgress = ref({ done: 0, total: 0 });
+
+/**
+ * 提前为所有勾选账号建立 WebSocket 连接。
+ * 之后设置跟随/开始战斗时无需再等建连(已连接账号直接复用现有连接)。
+ * 并发由 connectionManager 的连接槽位(maxActive)自动限流;
+ * 预连接成功后立即释放槽位(WebSocket 保持打开), 避免占满槽位阻塞后续任务。
+ */
+const connectSelectedAccounts = async () => {
+  if (isRunning.value || batchConnecting.value) return;
+  const tokens = selectedTokens.value
+    .map((id) => signedTokens.value.find((t) => t.id === id))
+    .filter(Boolean)
+    .filter((t) => tokenStore.getWebSocketStatus(t.id) !== "connected");
+  if (tokens.length === 0) {
+    toast("success", "所选账号均已连接");
+    return;
+  }
+  batchConnecting.value = true;
+  batchConnectProgress.value = { done: 0, total: tokens.length };
+  let okCount = 0;
+  let failCount = 0;
+  await Promise.all(
+    tokens.map(async (token) => {
+      try {
+        await connectionManager.ensureConnection(token.id, signedTokens.value);
+        connectionManager.releaseConnectionSlot();
+        okCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${accountName(token)} 预连接成功`,
+          type: "success",
+        });
+      } catch (e) {
+        failCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${accountName(token)} 预连接失败: ${e.message}`,
+          type: "error",
+        });
+      } finally {
+        batchConnectProgress.value = {
+          done: batchConnectProgress.value.done + 1,
+          total: batchConnectProgress.value.total,
+        };
+      }
+    }),
+  );
+  batchConnecting.value = false;
+  toast(
+    failCount > 0 ? "warning" : "success",
+    `预连接完成: 成功 ${okCount}，失败 ${failCount}`,
+  );
+};
+
 // ===== 盐场配置 =====
 const defaultSaltOptions = () => ({
   autoResurrect: true,
@@ -1247,7 +1347,6 @@ const defaultSaltOptions = () => ({
   autoMarch: true,
   marchStrategy: "nearToFar",
   autoSpeedUp: false,
-  followMemberIds: [],
   recruitTeam: true,
   teamMode: "random",
   priorityAttack: false,
@@ -1284,64 +1383,68 @@ const clubMembers = ref([]);
 const selectedMemberIds = useLocalStorage("batchBattle:selectedMemberIds", []);
 const loadingMembers = ref(false);
 const clubLoadError = ref("");
+// 成员列表来源: 账号名 · 俱乐部名
+const clubSourceLabel = ref("");
 
 const memberPickerMode = ref("team");
 const showMemberPicker = ref(false);
 const draftMemberIds = ref([]);
-const followMemberIds = useLocalStorage("batchBattle:followMemberIds", []);
+// 每个账号单独的跟随成员: { [tokenId]: [{ id, name }] }
+const perAccountFollow = useLocalStorage("batchBattle:perAccountFollow", {});
+// 当前跟随选择器对应的账号
+const pickerTokenId = ref("");
+const followConfiguredCount = computed(
+  () => Object.keys(perAccountFollow.value).length,
+);
 
 const pickerLimit = computed(() =>
   memberPickerMode.value === "team" ? MAX_TEAM_MEMBERS : 999,
 );
-const pickerTitle = computed(() =>
-  memberPickerMode.value === "follow"
-    ? "选择要跟随的俱乐部成员（可多选）"
-    : "选择俱乐部成员（最多4名）",
-);
+const pickerTitle = computed(() => {
+  if (memberPickerMode.value === "follow") {
+    const token = signedTokens.value.find((t) => t.id === pickerTokenId.value);
+    return "跟随人员 - " + (token ? accountName(token) : pickerTokenId.value);
+  }
+  return "选择俱乐部成员（最多4名）";
+});
 
 const selectedMembers = computed(() => {
   const map = new Map(clubMembers.value.map((m) => [m.roleId, m]));
   return selectedMemberIds.value.map((id) => map.get(String(id))).filter(Boolean);
 });
 
-const followedMembers = computed(() => {
-  const map = new Map(clubMembers.value.map((m) => [m.roleId, m]));
-  return followMemberIds.value.map((id) => map.get(String(id))).filter(Boolean);
-});
+// 俱乐部成员缓存: tokenId -> { members, clubName }, 避免重复打开选择器时再次请求
+const clubMembersCache = ref({});
+// 跟随选择器当前展示的成员(来自 pickerTokenId 自己的俱乐部)
+const pickerMembers = ref([]);
+const pickerSourceLabel = ref("");
 
-const loadClubMembers = async () => {
-  if (!sourceTokenId.value) {
-    clubLoadError.value = "请先在 Token 管理选择当前账号";
-    return;
+/**
+ * 拉取指定账号自己俱乐部的成员列表。
+ * 已连接的账号直接发 legion_getinfo (一次往返); 未连接才走 ensureConnection。
+ * 结果按账号缓存, force=true 时强制刷新。
+ */
+const fetchClubMembers = async (tokenId, force = false) => {
+  const cached = clubMembersCache.value[tokenId];
+  if (!force && cached && cached.members.length > 0) return cached;
+
+  let acquiredSlot = false;
+  if (tokenStore.getWebSocketStatus(tokenId) !== "connected") {
+    await connectionManager.ensureConnection(tokenId, signedTokens.value);
+    acquiredSlot = true;
   }
-  loadingMembers.value = true;
-  clubLoadError.value = "";
+  // 成员列表读取完成后立即释放槽位(连接保持打开), 避免长期占用阻塞批量任务
   try {
-    await connectionManager.ensureConnection(sourceTokenId.value, signedTokens.value);
-
-    // 与「游戏功能」一致：以 fire-and-forget 发送，响应由 LegionPlugin 写入
-    // tokenStore.gameData.legionInfo，轮询等待其刷新后读取成员
-    const prevUpdatedAt = tokenStore.gameData?.lastUpdated || null;
-    tokenStore.sendMessage(sourceTokenId.value, "legion_getinfo");
-
-    const start = Date.now();
-    let legionInfo = null;
-    while (Date.now() - start < 8000) {
-      const li = tokenStore.gameData?.legionInfo || null;
-      const members = li && li.info ? li.info.members : null;
-      const fresh = !prevUpdatedAt || li?.lastUpdated !== prevUpdatedAt;
-      if (li && members && Object.keys(members).length > 0 && fresh) {
-        legionInfo = li;
-        break;
-      }
-      await workerSleep(300);
-    }
-    if (!legionInfo) legionInfo = tokenStore.gameData?.legionInfo || null;
-
-    const info = (legionInfo ? legionInfo.info : null) || {};
+    const res = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "legion_getinfo",
+      {},
+      8000,
+    );
+    const info = (res && res.body && res.body.info) || (res && res.info) || {};
     const raw = info.members || {};
     const list = Array.isArray(raw) ? raw : Object.values(raw || {});
-    clubMembers.value = list.map((m) => ({
+    const members = list.map((m) => ({
       roleId: String(m.roleId),
       name: m.name || m.nickname || String(m.roleId),
       isOnline: !!m.isOnline,
@@ -1350,15 +1453,59 @@ const loadClubMembers = async () => {
       power: Number(m.power || (m.custom ? m.custom.s_power : 0) || 0),
       redQuench: Number(m.custom ? m.custom.red_quench_cnt || 0 : 0),
     }));
+    const entry = { members, clubName: info.name || "未命名俱乐部" };
+    clubMembersCache.value = { ...clubMembersCache.value, [tokenId]: entry };
+    return entry;
+  } finally {
+    if (acquiredSlot) connectionManager.releaseConnectionSlot();
+  }
+};
+
+const labelOfToken = (tokenId) => {
+  const token = signedTokens.value.find((t) => t.id === tokenId);
+  return token ? accountName(token) : tokenId;
+};
+
+// 弹窗表格实际渲染的成员列表(按模式区分来源)
+const currentPickerMembers = computed(() =>
+  memberPickerMode.value === "follow"
+    ? pickerMembers.value
+    : clubMembers.value,
+);
+const pickerSourceDisplay = computed(() =>
+  memberPickerMode.value === "follow"
+    ? pickerSourceLabel.value
+    : clubSourceLabel.value,
+);
+
+// 弹窗头部实时展示已勾选的跟随人员(按战力降序, 首个即实际跟随对象)
+const pickerSelectedText = computed(() => {
+  const map = new Map(currentPickerMembers.value.map((m) => [m.roleId, m]));
+  const picked = draftMemberIds.value
+    .map((id) => map.get(String(id)))
+    .filter(Boolean);
+  if (picked.length === 0) return "";
+  const sorted = picked.slice().sort((a, b) => (b.power || 0) - (a.power || 0));
+  return sorted
+    .map((m, i) => (i === 0 ? `${m.name}(战力最高·实际跟随)` : m.name))
+    .join("、");
+});
+
+// 指定队员(战斗队伍)成员列表: 读取顶部导航当前账号的俱乐部
+const loadClubMembers = async (force = false) => {
+  if (!sourceTokenId.value) {
+    clubLoadError.value = "请先在顶部导航切换要读取成员的账号";
+    return;
+  }
+  loadingMembers.value = true;
+  clubLoadError.value = "";
+  try {
+    const entry = await fetchClubMembers(sourceTokenId.value, force);
+    clubMembers.value = entry.members;
+    clubSourceLabel.value = labelOfToken(sourceTokenId.value) + " · " + entry.clubName;
     const ids = new Set(clubMembers.value.map((m) => m.roleId));
     selectedMemberIds.value = selectedMemberIds.value.filter((id) => ids.has(String(id)));
-    followMemberIds.value = followMemberIds.value.filter((id) => ids.has(String(id)));
     if (clubMembers.value.length === 0) clubLoadError.value = "该账号暂无俱乐部成员";
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: (sourceToken.value ? accountName(sourceToken.value) : sourceTokenId.value) + " 俱乐部成员 " + clubMembers.value.length + " 人",
-      type: "info",
-    });
   } catch (e) {
     clubLoadError.value = "加载俱乐部成员失败: " + e.message;
     toast("warning", clubLoadError.value);
@@ -1366,28 +1513,64 @@ const loadClubMembers = async () => {
     loadingMembers.value = false;
   }
 };
+
 const openMemberPicker = async () => {
   if (isRunning.value) return;
   memberPickerMode.value = "team";
-  if (clubMembers.value.length === 0 || clubLoadError.value) {
-    await loadClubMembers();
-  }
   draftMemberIds.value = selectedMemberIds.value.slice();
   showMemberPicker.value = true;
-};
-
-const openFollowPicker = async () => {
-  if (isRunning.value) return;
-  memberPickerMode.value = "follow";
   if (clubMembers.value.length === 0 || clubLoadError.value) {
     await loadClubMembers();
   }
-  draftMemberIds.value = followMemberIds.value.slice();
+};
+
+// 为某个账号单独打开「跟随人员」选择器(读取该账号自己俱乐部的成员)
+const openFollowPickerFor = async (token) => {
+  if (isRunning.value) return;
+  memberPickerMode.value = "follow";
+  pickerTokenId.value = token.id;
+  draftMemberIds.value = (perAccountFollow.value[token.id] || []).map((m) =>
+    String(m.id),
+  );
   showMemberPicker.value = true;
+  loadingMembers.value = true;
+  clubLoadError.value = "";
+  try {
+    const entry = await fetchClubMembers(token.id);
+    pickerMembers.value = entry.members;
+    pickerSourceLabel.value = labelOfToken(token.id) + " · " + entry.clubName;
+    const ids = new Set(entry.members.map((m) => m.roleId));
+    draftMemberIds.value = draftMemberIds.value.filter((id) => ids.has(String(id)));
+    if (entry.members.length === 0) clubLoadError.value = "该账号暂无俱乐部成员";
+  } catch (e) {
+    clubLoadError.value = "加载俱乐部成员失败: " + e.message;
+    toast("warning", clubLoadError.value);
+  } finally {
+    loadingMembers.value = false;
+  }
 };
 
 const reloadClubMembers = async () => {
-  await loadClubMembers();
+  if (memberPickerMode.value === "follow") {
+    if (!pickerTokenId.value) return;
+    loadingMembers.value = true;
+    clubLoadError.value = "";
+    try {
+      const entry = await fetchClubMembers(pickerTokenId.value, true);
+      pickerMembers.value = entry.members;
+      pickerSourceLabel.value = labelOfToken(pickerTokenId.value) + " · " + entry.clubName;
+      const ids = new Set(entry.members.map((m) => m.roleId));
+      draftMemberIds.value = draftMemberIds.value.filter((id) => ids.has(String(id)));
+      if (entry.members.length === 0) clubLoadError.value = "该账号暂无俱乐部成员";
+    } catch (e) {
+      clubLoadError.value = "加载俱乐部成员失败: " + e.message;
+      toast("warning", clubLoadError.value);
+    } finally {
+      loadingMembers.value = false;
+    }
+  } else {
+    await loadClubMembers(true);
+  }
 };
 
 const toggleDraftMember = (roleId, checked) => {
@@ -1412,7 +1595,22 @@ const toggleDraftMemberRow = (roleId) => {
 
 const confirmMemberPicker = () => {
   if (memberPickerMode.value === "follow") {
-    followMemberIds.value = draftMemberIds.value.slice();
+    const tokenId = pickerTokenId.value;
+    if (tokenId) {
+      const map = new Map(pickerMembers.value.map((m) => [m.roleId, m]));
+      const picked = draftMemberIds.value
+        .map((id) => map.get(String(id)))
+        .filter(Boolean)
+        .map((m) => ({
+          id: Number(m.roleId),
+          name: m.name,
+          power: Number(m.power) || 0,
+        }));
+      const next = { ...perAccountFollow.value };
+      if (picked.length === 0) delete next[tokenId];
+      else next[tokenId] = picked;
+      perAccountFollow.value = next;
+    }
   } else {
     selectedMemberIds.value = draftMemberIds.value.slice();
   }
@@ -1421,12 +1619,6 @@ const confirmMemberPicker = () => {
 
 const removeMember = (roleId) => {
   selectedMemberIds.value = selectedMemberIds.value.filter(
-    (id) => String(id) !== String(roleId),
-  );
-};
-
-const removeFollowMember = (roleId) => {
-  followMemberIds.value = followMemberIds.value.filter(
     (id) => String(id) !== String(roleId),
   );
 };
@@ -1634,7 +1826,6 @@ const buildSaltOptions = () => ({
   autoMarch: saltOptions.value.autoMarch,
   marchStrategy: saltOptions.value.marchStrategy,
   autoSpeedUp: saltOptions.value.autoSpeedUp,
-  followMemberIds: followMemberIds.value.map(Number),
   recruitTeam: saltOptions.value.recruitTeam,
   teamMode: saltOptions.value.teamMode,
   team:
@@ -1669,10 +1860,18 @@ const startBattle = async () => {
   // 弹出盐场关键信息(异步加载, 不阻塞战斗启动)
   openSaltSummary(tokens.find(Boolean));
 
-  const options = buildSaltOptions();
+  const baseOptions = buildSaltOptions();
   await Promise.all(
     tokens.map(async (token) => {
       if (!token || shouldStop.value) return;
+      // 每个账号使用自己单独配置的跟随成员(读取本俱乐部); 未配置则为空
+      const options = {
+        ...baseOptions,
+        followMemberIds: (perAccountFollow.value[token.id] || []).map((m) => ({
+          id: Number(m.id),
+          power: Number(m.power) || 0,
+        })),
+      };
       try {
         await runSaltFieldBattle(token.id, token, options, {
           tokenStore,
@@ -1717,7 +1916,7 @@ const exportBattleConfig = () => {
       saltOptions: saltOptions.value,
       selectedTokens: selectedTokens.value,
       selectedMemberIds: selectedMemberIds.value,
-      followMemberIds: followMemberIds.value,
+      perAccountFollow: perAccountFollow.value,
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], {
       type: "application/json",
@@ -1755,8 +1954,8 @@ const onImportFileChange = (event) => {
       if (Array.isArray(data.selectedMemberIds)) {
         selectedMemberIds.value = data.selectedMemberIds;
       }
-      if (Array.isArray(data.followMemberIds)) {
-        followMemberIds.value = data.followMemberIds;
+      if (data.perAccountFollow && typeof data.perAccountFollow === "object") {
+        perAccountFollow.value = data.perAccountFollow;
       }
       toast("success", "配置已导入并应用");
     } catch (err) {
@@ -1898,10 +2097,7 @@ const startPeachBattle = async () => {
 };
 
 onMounted(() => {
-  if (
-    (selectedMemberIds.value.length > 0 || followMemberIds.value.length > 0) &&
-    sourceTokenId.value
-  ) {
+  if (selectedMemberIds.value.length > 0 && sourceTokenId.value) {
     loadClubMembers();
   }
 });
@@ -2206,7 +2402,7 @@ onMounted(() => {
   gap: 8px 12px;
   margin-top: var(--spacing-sm);
 }
-@media (max-width: 880px) { .roster { grid-template-columns: 1fr; } }
+@media (max-width: 880px) { .roster { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .roster-item {
   display: flex;
   align-items: center;
@@ -2232,6 +2428,30 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+// ===== 账号单独跟随人员按钮 =====
+.roster-follow-btn {
+  flex: none;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.roster-follow-btn:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+.roster-follow-btn.has-members {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(102, 126, 234, 0.08);
+}
+.roster-follow-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 // ===== 账号连接状态圆点 =====
 .roster-status {
@@ -2666,6 +2886,17 @@ onMounted(() => {
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
+.picker-header-title {
+  min-width: 0;
+  flex: 1;
+}
+.picker-selected-names {
+  margin: 2px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--primary-color);
+  line-height: 1.4;
+  word-break: break-all;
+}
 .ui-modal-close {
   width: 28px;
   height: 28px;
@@ -2742,6 +2973,12 @@ onMounted(() => {
   margin-bottom: 8px;
   font-size: 12px;
   color: var(--text-tertiary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.picker-source {
+  color: var(--primary-color);
 }
 .ui-spinner {
   width: 18px;
