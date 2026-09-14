@@ -39,6 +39,8 @@ function extractBattlefield(res, addLog, name) {
     ["res.battlefield", res?.battlefield],
     ["res.data.battlefield", res?.data?.battlefield],
     ["res.body.battlefield", res?.body?.battlefield],
+    // 实测响应顶层为 [info, ended, roleBfState, legions], 战场数据在 info 下
+    ["res.info", res?.info],
     ["res 自身", res],
   ];
   for (const [label, data] of candidates) {
@@ -48,7 +50,9 @@ function extractBattlefield(res, addLog, name) {
       if (label !== "res 自身") {
         log(addLog, name, `战场数据取自 ${label}, bfId=${bfId}`);
       }
-      return { bfId, raw: data };
+      // 船只/玩家字段可能在顶层(如 res.cars)而非 info 内, 合并保证解析器可见
+      const raw = data === res ? res : { ...res, ...data };
+      return { bfId, raw };
     }
   }
   // 全部失败: 输出顶层字段名帮助定位真实结构

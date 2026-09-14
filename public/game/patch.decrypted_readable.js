@@ -6,18 +6,10 @@
 (function() {
   "use strict";
 
-  // ========== 反调试机制 ==========
-  var antiDebug = function() {
-    var startTime = new Date();
-    if (new Date() - startTime > 100) {
-      while (true) {} // 检测到调试器，进入死循环
-    }
-  };
-
-  // 每秒检测一次
-  if (typeof setInterval !== "undefined") {
-    setInterval(antiDebug, 1000);
-  }
+  // ========== 反调试机制（已移除）==========
+  // 原实现: setInterval 每秒比较两次 new Date(), 差值 >100ms 即进入 while(true){} 死循环。
+  // 本还原版不含 debugger 语句, 无法真正检测调试器, 只会在 GC 停顿/重排/复制等主线程
+  // 卡顿 >100ms 时误判并永久冻结标签页(表现为"复制文字后假死"), 故整段移除。
 
   // ========== 工具函数 ==========
   var strings = [
