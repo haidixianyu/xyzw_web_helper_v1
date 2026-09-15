@@ -306,9 +306,9 @@
     window[PATCHED_FLAG] = true;
 
     var css =
-      "#xyzw-mz-fab{position:fixed;left:10px;bottom:120px;z-index:2147483000;width:40px;height:40px;" +
+      "#xyzw-mz-fab{position:fixed;left:10px;bottom:120px;z-index:2147483000;width:30px;height:30px;" +
       "border-radius:50%;background:rgba(0,0,0,.6);color:#4ade80;border:1px solid rgba(74,222,128,.5);" +
-      "font-size:18px;line-height:38px;text-align:center;cursor:pointer;user-select:none;font-family:sans-serif;" +
+      "font-size:14px;line-height:28px;text-align:center;cursor:pointer;user-select:none;font-family:sans-serif;" +
       "touch-action:none;}" +
       "#xyzw-mz-fab.dragging{opacity:.75;cursor:grabbing;}" +
       "#xyzw-mz-panel{position:fixed;left:10px;bottom:168px;z-index:2147483000;width:230px;padding:10px 12px;" +
@@ -370,20 +370,16 @@
       sliderEl.disabled = !isEnabled();
     }
 
-    // ============ 🔍 按钮可拖动(参照上号器/雪花图标), 位置持久化 ============
-    var FAB_SIZE = 40;
-    function clampFabPos(left, top) {
-      var maxLeft = Math.max(0, window.innerWidth - FAB_SIZE);
-      var maxTop = Math.max(0, window.innerHeight - FAB_SIZE);
-      return [Math.max(0, Math.min(left, maxLeft)), Math.max(0, Math.min(top, maxTop))];
-    }
+    // ============ 🔍 按钮可拖动(完全对齐雪花 xh.js 的 DragManager), 位置持久化 ============
+    var FAB_SIZE = 30;
     function placeFab(left, top) {
-      var p = clampFabPos(left, top);
-      fab.style.left = p[0] + "px";
-      fab.style.top = p[1] + "px";
+      var maxLeft = Math.max(0, window.innerWidth - (fab.offsetWidth || FAB_SIZE));
+      var maxTop = Math.max(0, window.innerHeight - (fab.offsetHeight || FAB_SIZE));
+      fab.style.left = Math.max(0, Math.min(left, maxLeft)) + "px";
+      fab.style.top = Math.max(0, Math.min(top, maxTop)) + "px";
       fab.style.right = "auto";
       fab.style.bottom = "auto";
-      return p;
+      fab.style.transform = "none";
     }
     function restoreFabPos() {
       var pos = null;
@@ -415,88 +411,127 @@
     restoreFabPos();
     window.addEventListener("resize", restoreFabPos);
 
-    var drag = { active: false, moved: false, startX: 0, startY: 0, origLeft: 0, origTop: 0, touchId: null };
-    function dragStart(clientX, clientY) {
+    // 与 DragManager 一致: 拖拽期间一旦移动即 1:1 跟随(无起手门槛),
+    // 结束时用 moveDistance<5 判定是否为点击; touch 16ms 节流; rAF 保活。
+    var drag = {
+      active: false,
+      isTouch: false,
+      touchId: null,
+      startX: 0,
+      startY: 0,
+      startLeft: 0,
+      startTop: 0,
+      lastMoveTime: 0,
+      rafId: null,
+    };
+    function startDragging(clientX, clientY) {
       drag.active = true;
-      drag.moved = false;
       drag.startX = clientX;
       drag.startY = clientY;
-      var rect = fab.getBoundingClientRect();
-      drag.origLeft = rect.left;
-      drag.origTop = rect.top;
+      var ls = fab.style.left;
+      var ts = fab.style.top;
+      if (ls && ts && ls !== "auto" && ts !== "auto") {
+        drag.startLeft = parseFloat(ls) || 0;
+        drag.startTop = parseFloat(ts) || 0;
+      } else {
+        var rect = fab.getBoundingClientRect();
+        drag.startLeft = rect.left;
+        drag.startTop = rect.top;
+      }
       fab.classList.add("dragging");
+      startAnimationFrame();
     }
-    function dragMove(clientX, clientY) {
-      if (!drag.active) return;
-      var dx = clientX - drag.startX;
-      var dy = clientY - drag.startY;
-      if (!drag.moved && Math.sqrt(dx * dx + dy * dy) < 5) return;
-      drag.moved = true;
-      placeFab(drag.origLeft + dx, drag.origTop + dy);
+    function updatePosition(clientX, clientY) {
+      var now = Date.now();
+      if (drag.isTouch && now - drag.lastMoveTime < 16) return;
+      drag.lastMoveTime = now;
+      placeFab(drag.startLeft + (clientX - drag.startX), drag.startTop + (clientY - drag.startY));
       if (panel.classList.contains("show")) positionPanel();
     }
-    function dragEnd() {
+    function startAnimationFrame() {
+      var update = function () {
+        if (drag.active) drag.rafId = requestAnimationFrame(update);
+      };
+      drag.rafId = requestAnimationFrame(update);
+    }
+    function endDragging() {
       if (!drag.active) return;
       drag.active = false;
       fab.classList.remove("dragging");
-      if (drag.moved) {
-        var rect = fab.getBoundingClientRect();
-        try {
-          writeRaw(FAB_POS_KEY, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
-        } catch (e) {}
+      if (drag.rafId) {
+        cancelAnimationFrame(drag.rafId);
+        drag.rafId = null;
       }
+      var left = parseFloat(fab.style.left) || 0;
+      var top = parseFloat(fab.style.top) || 0;
+      try {
+        writeRaw(FAB_POS_KEY, JSON.stringify({ left: left, top: top }));
+      } catch (e) {}
+      var moveDistance = Math.sqrt(
+        Math.pow(Math.abs(left - drag.startLeft), 2) + Math.pow(Math.abs(top - drag.startTop), 2)
+      );
+      return moveDistance;
     }
 
     fab.addEventListener("mousedown", function (e) {
-      if (e.button !== 0) return;
-      dragStart(e.clientX, e.clientY);
+      if (e.button === 2) return;
+      drag.isTouch = false;
+      startDragging(e.clientX, e.clientY);
       e.preventDefault();
       e.stopPropagation();
     });
     document.addEventListener("mousemove", function (e) {
-      if (!drag.active || drag.touchId !== null) return;
-      dragMove(e.clientX, e.clientY);
-      if (drag.moved) e.preventDefault();
+      if (!drag.active || drag.isTouch) return;
+      updatePosition(e.clientX, e.clientY);
+      e.preventDefault();
     });
-    document.addEventListener("mouseup", function () {
-      if (drag.touchId !== null || !drag.active) return;
-      var wasMoved = drag.moved;
-      dragEnd();
-      if (!wasMoved) togglePanelFromFab();
+    document.addEventListener("mouseup", function (e) {
+      if (!drag.active || drag.isTouch) return;
+      var moveDistance = endDragging();
+      if (moveDistance < 5) togglePanelFromFab();
     });
 
-    fab.addEventListener("touchstart", function (e) {
-      if (e.touches.length > 1) return;
-      drag.touchId = e.touches[0].identifier;
-      dragStart(e.touches[0].clientX, e.touches[0].clientY);
-      e.preventDefault();
-      e.stopPropagation();
-    }, { passive: false });
-    document.addEventListener("touchmove", function (e) {
-      if (!drag.active || drag.touchId === null) return;
-      for (var i = 0; i < e.touches.length; i++) {
-        if (e.touches[i].identifier === drag.touchId) {
-          dragMove(e.touches[i].clientX, e.touches[i].clientY);
-          if (drag.moved) e.preventDefault();
-          break;
+    fab.addEventListener(
+      "touchstart",
+      function (e) {
+        if (e.touches.length > 1) return;
+        drag.isTouch = true;
+        drag.touchId = e.touches[0].identifier;
+        startDragging(e.touches[0].clientX, e.touches[0].clientY);
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { passive: false }
+    );
+    document.addEventListener(
+      "touchmove",
+      function (e) {
+        if (!drag.active || !drag.isTouch) return;
+        var touch = null;
+        for (var i = 0; i < e.touches.length; i++) {
+          if (e.touches[i].identifier === drag.touchId) {
+            touch = e.touches[i];
+            break;
+          }
         }
-      }
-    }, { passive: false });
+        if (!touch) return;
+        updatePosition(touch.clientX, touch.clientY);
+        e.preventDefault();
+      },
+      { passive: false }
+    );
     document.addEventListener("touchend", function (e) {
-      if (drag.touchId === null) return;
-      var stillThere = false;
+      if (!drag.active || !drag.isTouch) return;
       for (var i = 0; i < e.touches.length; i++) {
-        if (e.touches[i].identifier === drag.touchId) stillThere = true;
+        if (e.touches[i].identifier === drag.touchId) return; // 该手指未抬起
       }
-      if (stillThere) return;
-      var wasMoved = drag.moved;
       drag.touchId = null;
-      dragEnd();
-      if (!wasMoved) togglePanelFromFab();
+      var moveDistance = endDragging();
+      if (moveDistance < 5) togglePanelFromFab();
     });
     document.addEventListener("touchcancel", function () {
       drag.touchId = null;
-      dragEnd();
+      endDragging();
     });
     fab.addEventListener("dragstart", function (e) {
       e.preventDefault();

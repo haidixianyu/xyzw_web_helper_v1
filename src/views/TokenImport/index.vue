@@ -843,6 +843,7 @@ import {
   Layers,
   LockOpen,
   PersonCircle,
+  RadioOutline,
   Refresh,
   Settings,
   Star,
@@ -907,6 +908,26 @@ const nightmareSkipEnabled = ref(localStorage.getItem(NIGHTMARE_SKIP_KEY) === "1
 watch(nightmareSkipEnabled, (v) => {
   localStorage.setItem(NIGHTMARE_SKIP_KEY, v ? "1" : "0");
 });
+
+// WS日志按账号开关：键 ws_log_enabled:{tokenId}，游戏内 public/game/ws-capture.js 读取后
+// 才显示📡雷达并记录 WS 请求(cmd+参数)/响应(cmd+code+数据)
+const wsLogEnabledIds = ref(
+  new Set(
+    (tokenStore.gameTokens || [])
+      .filter((t) => localStorage.getItem(`ws_log_enabled:${t.id}`) === "1")
+      .map((t) => t.id)
+  )
+);
+const wsLogEnabled = (tokenId) => wsLogEnabledIds.value.has(tokenId);
+const toggleWsLog = (token) => {
+  const next = !wsLogEnabled(token.id);
+  localStorage.setItem(`ws_log_enabled:${token.id}`, next ? "1" : "0");
+  const s = new Set(wsLogEnabledIds.value);
+  if (next) s.add(token.id);
+  else s.delete(token.id);
+  wsLogEnabledIds.value = s;
+  message.success(next ? `已开启「${token.name || token.id}」的WS日志（下次打开游戏生效）` : `已关闭「${token.name || token.id}」的WS日志`);
+};
 
 // 分组选择：选中的分组ID列表，用于按分组批量操作
 const selectedGroupIds = ref([]);
@@ -1466,6 +1487,12 @@ const getTokenActions = (token) => {
   actions.push(
     { type: "divider" },
     {
+      label: wsLogEnabled(token.id) ? "关闭WS日志" : "开启WS日志",
+      key: "toggle-ws-log",
+      icon: () => h(NIcon, null, { default: () => h(RadioOutline) }),
+    },
+    { type: "divider" },
+    {
       label: "删除",
       key: "delete",
       icon: () => h(NIcon, null, { default: () => h(TrashBin) }),
@@ -1500,6 +1527,9 @@ const handleTokenAction = async (key, token) => {
       break;
     case "import-bin":
       importSingleBin(token);
+      break;
+    case "toggle-ws-log":
+      toggleWsLog(token);
       break;
   }
 };
