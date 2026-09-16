@@ -366,7 +366,8 @@ window.parseRemoteBundleVers = function (settingsObj) {
 }
 
 window.loadRemoteBundleVers = async function () {
-  const version = typeof GAME_VERSION === 'string' && GAME_VERSION ? GAME_VERSION : '0.32.0-android'
+  // manifest 仅接受 android 通道值(实测其他 version 返回无 bundleVers), 与 GAME_VERSION 解耦
+  const version = '0.32.0-android'
   const manifestUrl = `https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=${encodeURIComponent(version)}`
   console.log('[remoteAssets] POST manifest', manifestUrl)
 

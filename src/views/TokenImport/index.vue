@@ -845,7 +845,9 @@ import {
   PersonCircle,
   RadioOutline,
   Refresh,
+  SearchOutline,
   Settings,
+  SnowOutline,
   Star,
   SyncCircle,
   TrashBin,
@@ -929,6 +931,32 @@ const toggleWsLog = (token) => {
   message.success(next ? `已开启「${token.name || token.id}」的WS日志（下次打开游戏生效）` : `已关闭「${token.name || token.id}」的WS日志`);
 };
 
+// 游戏内悬浮图标按账号显隐开关：键 snow_icon_enabled:{tokenId} / zoom_icon_enabled:{tokenId}
+// 缺省(无键或"1")=显示；游戏内 xh.js / map-zoom.js 读到 "0" 时隐藏对应图标。
+// 用响应式 Set 记录"已关闭"的账号, 保证菜单文字点击后立即变更。
+const makeIconToggle = (keyPrefix, label) => {
+  const disabledIds = ref(
+    new Set(
+      (tokenStore.gameTokens || [])
+        .filter((t) => localStorage.getItem(`${keyPrefix}:${t.id}`) === "0")
+        .map((t) => t.id)
+    )
+  );
+  const enabled = (tokenId) => !disabledIds.value.has(tokenId);
+  const toggle = (token) => {
+    const next = enabled(token.id);
+    localStorage.setItem(`${keyPrefix}:${token.id}`, next ? "0" : "1");
+    const s = new Set(disabledIds.value);
+    if (next) s.add(token.id);
+    else s.delete(token.id);
+    disabledIds.value = s;
+    message.success(`已${next ? "关闭" : "开启"}「${token.name || token.id}」的${label}（下次打开游戏生效）`);
+  };
+  return { enabled, toggle };
+};
+const snowIcon = makeIconToggle("snow_icon_enabled", "❄️雪花图标");
+const zoomIcon = makeIconToggle("zoom_icon_enabled", "🔍缩放图标");
+
 // 分组选择：选中的分组ID列表，用于按分组批量操作
 const selectedGroupIds = ref([]);
 const tokenGroups = computed(() => tokenStore.tokenGroups || []);
@@ -953,6 +981,13 @@ const selectedGroupTokens = computed(() => {
 // 获取批量操作的目标token列表：选中分组时操作分组内token，否则操作全部token
 const getTargetTokens = () => {
   const ids = selectedGroupTokenIds.value;
+  if (ids.size === 0) return tokenStore.gameTokens;
+  return tokenStore.gameTokens.filter((t) => ids.has(t.id));
+};
+
+// 导出目标：以列表中勾选的账号为准（分组点选会同步勾选账号）；一个都没勾选时返回全部
+const getExportTargetTokens = () => {
+  const ids = multiGameSelectedTokenIds.value;
   if (ids.size === 0) return tokenStore.gameTokens;
   return tokenStore.gameTokens.filter((t) => ids.has(t.id));
 };
@@ -1491,6 +1526,16 @@ const getTokenActions = (token) => {
       key: "toggle-ws-log",
       icon: () => h(NIcon, null, { default: () => h(RadioOutline) }),
     },
+    {
+      label: snowIcon.enabled(token.id) ? "关闭❄️图标" : "开启❄️图标",
+      key: "toggle-snow-icon",
+      icon: () => h(NIcon, null, { default: () => h(SnowOutline) }),
+    },
+    {
+      label: zoomIcon.enabled(token.id) ? "关闭🔍图标" : "开启🔍图标",
+      key: "toggle-zoom-icon",
+      icon: () => h(NIcon, null, { default: () => h(SearchOutline) }),
+    },
     { type: "divider" },
     {
       label: "删除",
@@ -1530,6 +1575,12 @@ const handleTokenAction = async (key, token) => {
       break;
     case "toggle-ws-log":
       toggleWsLog(token);
+      break;
+    case "toggle-snow-icon":
+      snowIcon.toggle(token);
+      break;
+    case "toggle-zoom-icon":
+      zoomIcon.toggle(token);
       break;
   }
 };
@@ -1743,7 +1794,7 @@ const handleBulkAction = (key) => {
 
 const exportTokens = async () => {
   try {
-    const targetIds = [...selectedGroupTokenIds.value];
+    const targetIds = getExportTargetTokens().map((t) => t.id);
     const data = await tokenStore.exportTokens(false, targetIds);
     const dataStr = JSON.stringify(data, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
@@ -1753,7 +1804,7 @@ const exportTokens = async () => {
     link.download = `tokens_backup_${new Date().toISOString().split("T")[0]}.json`;
     link.click();
 
-    message.success("Token数据已导出");
+    message.success(`Token数据已导出（${targetIds.length} 个）`);
   } catch (error) {
     message.error("导出失败");
   }
@@ -1761,7 +1812,7 @@ const exportTokens = async () => {
 
 const exportTokensWithBin = async () => {
   try {
-    const targetIds = [...selectedGroupTokenIds.value];
+    const targetIds = getExportTargetTokens().map((t) => t.id);
     const data = await tokenStore.exportTokens(true, targetIds);
     const dataStr = JSON.stringify(data, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
@@ -1771,7 +1822,7 @@ const exportTokensWithBin = async () => {
     link.download = `tokens_backup_with_bin_${new Date().toISOString().split("T")[0]}.json`;
     link.click();
 
-    message.success("Token及BIN数据已导出");
+    message.success(`Token及BIN数据已导出（${targetIds.length} 个）`);
   } catch (error) {
     message.error("导出失败: " + (error.message || "未知错误"));
   }
@@ -1855,8 +1906,11 @@ const base64ToArrayBuffer = (base64) => {
 // 批量导出BIN（仅BIN数据）
 const exportBinBulk = async () => {
   try {
-    const binTokens = getTargetTokens().filter(
-      (t) => t.importMethod === "bin" || t.importMethod === "wxQrcode",
+    const binTokens = getExportTargetTokens().filter(
+      (t) =>
+        t.importMethod === "bin" ||
+        t.importMethod === "wxQrcode" ||
+        t.importMethod === "sms",
     );
     const binBuffers = {};
     for (const token of binTokens) {

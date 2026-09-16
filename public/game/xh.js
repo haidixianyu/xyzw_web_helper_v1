@@ -2631,11 +2631,27 @@
       }
       
       createUI() {
+        // 账号级显隐开关: token页「⋯→隐藏❄️图标」写 snow_icon_enabled:{bin_id}=0
+        // (multi-game 下开关写在顶层窗口, 回退读 window.top; 下次打开游戏生效)
+        let hideSnowIcon = false;
+        try {
+          const binId = localStorage.getItem('current_bin_id') || '';
+          if (binId) {
+            const key = 'snow_icon_enabled:' + binId;
+            let v = localStorage.getItem(key);
+            if (v === null && window.top !== window) {
+              try { v = window.top.localStorage.getItem(key); } catch (e) {}
+            }
+            hideSnowIcon = (v === '0');
+          }
+        } catch (e) {}
+
         // 创建工具开关按钮
         const toggleBtn = document.createElement('button');
         toggleBtn.id = 'script-tool-toggle';
         toggleBtn.className = 'script-tool-toggle';
         toggleBtn.textContent = '❄️';
+        if (hideSnowIcon) toggleBtn.style.display = 'none';
         document.body.appendChild(toggleBtn);
         
         // 创建工具容器

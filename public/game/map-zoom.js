@@ -301,8 +301,22 @@
   }, APPLY_INTERVAL);
 
   // ============ 游戏内浮动控制面板 ============
+  // 账号级显隐开关: token页「⋯→隐藏图标」写 zoom_icon_enabled:{bin_id}=0 时不创建面板
+  // (缩放功能本身不受影响, 已启用的缩放值仍由保活轮询维持)
+  function iconHiddenByAccount(key) {
+    try {
+      var binId = localStorage.getItem("current_bin_id") || "";
+      if (!binId) return false;
+      var k = key + ":" + binId;
+      var v = readRaw(k);
+      return v === "0";
+    } catch (e) {
+      return false;
+    }
+  }
   function buildPanel() {
     if (window[PATCHED_FLAG]) return;
+    if (iconHiddenByAccount("zoom_icon_enabled")) return;
     window[PATCHED_FLAG] = true;
 
     var css =

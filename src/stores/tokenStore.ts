@@ -1231,7 +1231,12 @@ export const useTokenStore = defineStore("tokens", () => {
     if (includeBin) {
       const binBuffers: Record<string, string> = {};
       for (const token of targetTokens) {
-        if (token.importMethod === "bin" || token.importMethod === "wxQrcode") {
+        // sms 登录同样会生成并存储 BIN（见 smslogin.vue storeArrayBuffer）
+        if (
+          token.importMethod === "bin" ||
+          token.importMethod === "wxQrcode" ||
+          token.importMethod === "sms"
+        ) {
           let buffer = await getArrayBuffer(token.id);
           if (!buffer) buffer = await getArrayBuffer(token.name);
           if (buffer) binBuffers[token.id] = arrayBufferToBase64(buffer);

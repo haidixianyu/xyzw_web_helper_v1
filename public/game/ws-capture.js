@@ -96,6 +96,7 @@
 
   // ============ 1) 命令级抓取: trap __require 找 WebSocketClient 原型 ============
   var protoPatched = false;
+  var instSendPatched = 0;
   function looksLikeWsClientProto(p) {
     try {
       return (
@@ -118,19 +119,111 @@
       proto.__xyzwWsPatched__ = true;
       protoPatched = true;
 
-      var origSend = proto.send;
-      proto.send = function (e) {
+      // 游戏协议层发请求多用数字命令号 e.c 而非字符串 e.cmd(引擎: r.c=e.c, r.c||(r.cmd=e.cmd))
+      // 记录时 cmd 取字符串, 无则记 "c:<数字>"; 响应侧服务端回带字符串 cmd 可对照解析
+      function recordSend(e) {
         try {
-          if (e && e.cmd && !isSys(e.cmd)) {
-            push({ k: ">>", cmd: e.cmd, params: e.params === undefined ? null : brief(e.params, 1000) });
+          if (!e) return;
+          if (e.cmd || e.c !== undefined) {
+            if (isSys(e.cmd)) return;
+            push({
+              k: ">>",
+              cmd: e.cmd || "c:" + e.c,
+              c: e.c,
+              params: e.params === undefined ? null : brief(e.params, 1000),
+            });
+          } else {
+            // 结构未知(既无 cmd 也无 c): 仍记录, 便于诊断真实入参形态
+            push({ k: ">>?", keys: brief(Object.keys(e)), raw: brief(e, 500) });
           }
         } catch (_) {}
+      }
+      function mark(fn) {
+        try {
+          fn.__xyzwSendPatch__ = true;
+        } catch (_) {}
+        return fn;
+      }
+      // 兜底: 派生类/实例在自身(或其原型)上覆盖了 send 时, 原型补丁会被遮蔽。
+      // 在收到响应(doReceive)和心跳(sendHeartbeat)时借 this 拿到实例, 把 send 包成实例自有属性。
+      function ensureInstanceSend(inst) {
+        try {
+          var f = inst.send;
+          if (typeof f === "function" && !f.__xyzwSendPatch__) {
+            inst.send = mark(function (e) {
+              recordSend(e);
+              return f.apply(inst, arguments);
+            });
+            instSendPatched++;
+          }
+        } catch (_) {}
+      }
+
+      var origSend = proto.send;
+      proto.send = mark(function (e) {
+        recordSend(e);
         return origSend.apply(this, arguments);
-      };
+      });
+
+      // 实际 bundle 版本可能与本地副本不同: 部分请求可能直接走 sendAsync
+      if (typeof proto.sendAsync === "function") {
+        var origSendAsync = proto.sendAsync;
+        proto.sendAsync = mark(function (e) {
+          recordSend(e);
+          return origSendAsync.apply(this, arguments);
+        });
+      }
+
+      var origHb = proto.sendHeartbeat;
+      if (typeof origHb === "function") {
+        proto.sendHeartbeat = function () {
+          ensureInstanceSend(this);
+          return origHb.apply(this, arguments);
+        };
+      }
+
+      // 一次性诊断: 打印真实收发对象的形态, 定位请求为何绕过 send
+      var diagDone = false;
+      function diagClient(inst) {
+        if (diagDone) return;
+        diagDone = true;
+        try {
+          var ownFns = [];
+          for (var k in inst) {
+            if (Object.prototype.hasOwnProperty.call(inst, k) && typeof inst[k] === "function") {
+              ownFns.push(k + (inst[k].__xyzwSendPatch__ ? "*" : ""));
+            }
+          }
+          var chain = [];
+          var p = Object.getPrototypeOf(inst);
+          var depth = 0;
+          while (p && depth < 5) {
+            chain.push((p.constructor && p.constructor.name) || "?");
+            if (p === proto) {
+              chain.push("sendPatched=" + !!proto.send.__xyzwSendPatch__);
+              break;
+            }
+            p = Object.getPrototypeOf(p);
+            depth++;
+          }
+          push({
+            k: "diag",
+            ctor: (inst.constructor && inst.constructor.name) || "?",
+            ownFns: ownFns.join(","),
+            protoChain: chain.join("->"),
+            hasSendOnInst: Object.prototype.hasOwnProperty.call(inst, "send"),
+            sendIsPatched: typeof inst.send === "function" && !!inst.send.__xyzwSendPatch__,
+          });
+        } catch (e) {
+          push({ k: "diag", err: String(e) });
+        }
+      }
 
       var origRecv = proto.doReceive;
       proto.doReceive = function (e) {
         try {
+          diagClient(this);
+          ensureInstanceSend(this);
           if (e && e.cmd && !isSys(e.cmd)) {
             var data = null;
             try {
@@ -241,6 +334,19 @@
       var ws = protocols !== undefined ? new NativeWS(url, protocols) : new NativeWS(url);
       try {
         push({ k: "ws-open", url: String(url).slice(0, 200) });
+        // 诊断: 统计原生 socket 真实发出的帧(引擎 doSend 直发时不经过 send, 这里兜底计数)
+        var rawSend = ws.send;
+        ws.send = function (d) {
+          try {
+            var n = typeof d === "string" ? d.length : d && d.byteLength !== undefined ? d.byteLength : -1;
+            if (ws.__xyzwOutFrames === undefined) ws.__xyzwOutFrames = 0;
+            ws.__xyzwOutFrames++;
+            if (ws.__xyzwOutFrames <= 30) {
+              push({ k: ">>bin", bytes: n });
+            }
+          } catch (_) {}
+          return rawSend.apply(ws, arguments);
+        };
       } catch (e) {}
       return ws;
     };
@@ -316,6 +422,7 @@
       at: new Date().toISOString(),
       bin: currentBinId(),
       hooked: protoPatched,
+      instSend: instSendPatched,
       ver: typeof GAME_VERSION !== "undefined" ? GAME_VERSION : "?",
       events: rows,
     });
@@ -339,7 +446,17 @@
   window.__wsDump = dump;
   window.__wsCap = CAP;
 
-  // ============ 4) 📡 悬浮导出按钮(左上角) ============
+  function clearLog() {
+    CAP.length = 0;
+    try {
+      localStorage.removeItem("xyzw_ws_capture");
+    } catch (e) {}
+    toast("🗑 日志已清除, 可开始记录最新操作", true);
+  }
+
+  // ============ 4) 📡 悬浮导出按钮(可拖动, 默认左上角避开 /game 的"返回"按钮) ============
+  var RADAR_POS_KEY = "ws_capture_radar_pos_v1";
+  var RADAR_SIZE = 28;
   function buildBtn() {
     if (!document.body) {
       setTimeout(buildBtn, 500);
@@ -348,14 +465,198 @@
     var b = document.createElement("div");
     b.textContent = "📡";
     b.title = protoPatched
-      ? "导出 WS 命令日志(请求cmd+参数/响应)"
+      ? "导出 WS 命令日志(可拖动)"
       : "导出日志(尚未挂钩到游戏网络层, 请稍后再点)";
     b.style.cssText =
-      "position:fixed;left:8px;top:8px;z-index:2147483001;width:28px;height:28px;" +
+      "position:fixed;z-index:2147483001;width:28px;height:28px;" +
       "border-radius:50%;background:rgba(0,0,0,.45);color:#fff;font-size:13px;" +
-      "line-height:28px;text-align:center;cursor:pointer;user-select:none;opacity:.6;";
-    b.addEventListener("click", function () {
-      dump("manual");
+      "line-height:28px;text-align:center;cursor:pointer;user-select:none;opacity:.6;" +
+      "touch-action:none;font-family:sans-serif;";
+    function placeRadar(left, top) {
+      var maxLeft = Math.max(0, window.innerWidth - (b.offsetWidth || RADAR_SIZE));
+      var maxTop = Math.max(0, window.innerHeight - (b.offsetHeight || RADAR_SIZE));
+      b.style.left = Math.max(0, Math.min(left, maxLeft)) + "px";
+      b.style.top = Math.max(0, Math.min(top, maxTop)) + "px";
+      b.style.right = "auto";
+      b.style.bottom = "auto";
+      b.style.transform = "none";
+    }
+    function restoreRadarPos() {
+      var pos = null;
+      try {
+        pos = JSON.parse(localStorage.getItem(RADAR_POS_KEY) || "null");
+      } catch (e) {}
+      if (pos && isFinite(pos.left) && isFinite(pos.top)) {
+        placeRadar(Number(pos.left), Number(pos.top));
+      } else {
+        // 默认避开 /game 左上角的"← 返回"按钮(其高度约 32px)
+        placeRadar(8, 48);
+      }
+    }
+    restoreRadarPos();
+    window.addEventListener("resize", restoreRadarPos);
+
+    // 点击弹出的操作菜单: 复制日志 / 清除日志
+    var menu = document.createElement("div");
+    menu.style.cssText =
+      "position:fixed;z-index:2147483003;display:none;flex-direction:column;min-width:120px;" +
+      "background:rgba(20,20,28,.95);border:1px solid rgba(74,222,128,.4);border-radius:8px;" +
+      "overflow:hidden;font-family:sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5);";
+    menu.innerHTML =
+      '<div data-act="copy" style="padding:9px 14px;color:#4ade80;font-size:13px;cursor:pointer;">📋 复制日志</div>' +
+      '<div data-act="clear" style="padding:9px 14px;color:#f87171;font-size:13px;cursor:pointer;border-top:1px solid rgba(255,255,255,.12);">🗑 清除日志</div>';
+    document.body.appendChild(menu);
+    function positionMenu() {
+      var rect = b.getBoundingClientRect();
+      var mw = menu.offsetWidth || 128;
+      var mh = menu.offsetHeight || 76;
+      var left = rect.right + 6;
+      if (left + mw > window.innerWidth - 4) left = rect.left - mw - 6;
+      left = Math.max(4, Math.min(left, window.innerWidth - mw - 4));
+      var top = Math.max(4, Math.min(rect.top, window.innerHeight - mh - 4));
+      menu.style.left = left + "px";
+      menu.style.top = top + "px";
+    }
+    function hideMenu() {
+      menu.style.display = "none";
+    }
+    function toggleMenu() {
+      if (menu.style.display === "flex") {
+        hideMenu();
+        return;
+      }
+      positionMenu();
+      menu.style.display = "flex";
+    }
+    menu.addEventListener("mousedown", function (e) {
+      e.stopPropagation();
+    });
+    menu.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var act = e.target && e.target.getAttribute && e.target.getAttribute("data-act");
+      if (act === "copy") dump("manual");
+      else if (act === "clear") clearLog();
+      hideMenu();
+    });
+    // 点击菜单外部关闭
+    document.addEventListener(
+      "mousedown",
+      function (e) {
+        if (menu.style.display !== "flex") return;
+        if (menu.contains(e.target) || e.target === b) return;
+        hideMenu();
+      },
+      true
+    );
+
+    // 拖拽: 与雪花 DragManager 一致(移动即 1:1 跟随, 结束按距离<5 判点击)
+    var drag = {
+      active: false,
+      isTouch: false,
+      touchId: null,
+      startX: 0,
+      startY: 0,
+      startLeft: 0,
+      startTop: 0,
+      lastMoveTime: 0,
+      rafId: null,
+    };
+    function startDragging(clientX, clientY) {
+      drag.active = true;
+      drag.startX = clientX;
+      drag.startY = clientY;
+      var rect = b.getBoundingClientRect();
+      drag.startLeft = rect.left;
+      drag.startTop = rect.top;
+      b.style.opacity = "0.85";
+      var update = function () {
+        if (drag.active) drag.rafId = requestAnimationFrame(update);
+      };
+      drag.rafId = requestAnimationFrame(update);
+    }
+    function updatePosition(clientX, clientY) {
+      var nowMs = Date.now();
+      if (drag.isTouch && nowMs - drag.lastMoveTime < 16) return;
+      drag.lastMoveTime = nowMs;
+      placeRadar(drag.startLeft + (clientX - drag.startX), drag.startTop + (clientY - drag.startY));
+    }
+    function endDragging() {
+      if (!drag.active) return -1;
+      drag.active = false;
+      b.style.opacity = "0.6";
+      if (drag.rafId) {
+        cancelAnimationFrame(drag.rafId);
+        drag.rafId = null;
+      }
+      var left = parseFloat(b.style.left) || 0;
+      var top = parseFloat(b.style.top) || 0;
+      try {
+        localStorage.setItem(RADAR_POS_KEY, JSON.stringify({ left: left, top: top }));
+      } catch (e) {}
+      return Math.sqrt(
+        Math.pow(Math.abs(left - drag.startLeft), 2) + Math.pow(Math.abs(top - drag.startTop), 2)
+      );
+    }
+
+    b.addEventListener("mousedown", function (e) {
+      if (e.button === 2) return;
+      drag.isTouch = false;
+      startDragging(e.clientX, e.clientY);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    document.addEventListener("mousemove", function (e) {
+      if (!drag.active || drag.isTouch) return;
+      updatePosition(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    document.addEventListener("mouseup", function () {
+      if (!drag.active || drag.isTouch) return;
+      if (endDragging() < 5) toggleMenu();
+    });
+    b.addEventListener(
+      "touchstart",
+      function (e) {
+        if (e.touches.length > 1) return;
+        drag.isTouch = true;
+        drag.touchId = e.touches[0].identifier;
+        startDragging(e.touches[0].clientX, e.touches[0].clientY);
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { passive: false }
+    );
+    document.addEventListener(
+      "touchmove",
+      function (e) {
+        if (!drag.active || !drag.isTouch) return;
+        var touch = null;
+        for (var i = 0; i < e.touches.length; i++) {
+          if (e.touches[i].identifier === drag.touchId) {
+            touch = e.touches[i];
+            break;
+          }
+        }
+        if (!touch) return;
+        updatePosition(touch.clientX, touch.clientY);
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+    document.addEventListener("touchend", function (e) {
+      if (!drag.active || !drag.isTouch) return;
+      for (var i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === drag.touchId) return;
+      }
+      drag.touchId = null;
+      if (endDragging() < 5) toggleMenu();
+    });
+    document.addEventListener("touchcancel", function () {
+      drag.touchId = null;
+      endDragging();
+    });
+    b.addEventListener("dragstart", function (e) {
+      e.preventDefault();
     });
     document.body.appendChild(b);
   }
