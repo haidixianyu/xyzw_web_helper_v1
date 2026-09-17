@@ -6,7 +6,7 @@
       <iframe
         :src="gameSrc"
         class="game-iframe"
-        allow="fullscreen; autoplay"
+        allow="fullscreen; autoplay; clipboard-write"
       />
     </div>
   </div>

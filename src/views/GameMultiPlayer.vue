@@ -124,7 +124,7 @@
             :src="frame.src"
             :title="`${frame.name} 的游戏窗口`"
             class="game-frame"
-            allow="fullscreen; autoplay"
+            allow="fullscreen; autoplay; clipboard-write"
             @error="markFrameFatal(frame.scopeId)"
           />
           <div
