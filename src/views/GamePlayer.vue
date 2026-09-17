@@ -13,6 +13,7 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -22,7 +23,28 @@ const gameSrc = import.meta.env.BASE_URL + 'game/index.html'
 function goBack() {
   router.push('/admin/dashboard')
 }
+
+// 游戏路由期间把宿主页面刷黑并锁死滚动, 避免 iOS 上 iframe 重绘白闪时露出浅色
+// 背景, 或 iframe 内容把宿主页面带出滚动区域
+onMounted(() => {
+  document.documentElement.classList.add('xyzw-game-route')
+})
+onUnmounted(() => {
+  document.documentElement.classList.remove('xyzw-game-route')
+})
 </script>
+
+<style>
+/* 非 scoped: 作用到路由根节点以外的 html/body */
+html.xyzw-game-route,
+html.xyzw-game-route body {
+  background: #000 !important;
+}
+html.xyzw-game-route body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+</style>
 
 <style scoped>
 .game-player {
@@ -30,14 +52,14 @@ function goBack() {
   inset: 0;
   z-index: 1;
   background: #000;
+  overflow: hidden;
 }
 
 .iframe-wrapper {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
+  z-index: 1;
+  background: #000;
 }
 
 .game-iframe {
@@ -45,13 +67,19 @@ function goBack() {
   height: 100%;
   border: none;
   display: block;
+  /* 游戏首屏样式生效前 iframe 视口默认是白底, 黑底可消除 iOS 上的白闪 */
+  background: #000;
 }
 
 .back-btn {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 200;
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  z-index: 1000;
+  /* iOS Safari 会把重型 WebGL 的 iframe 提升为独立合成层并盖住同层兄弟节点,
+     即使 z-index 更高也可能被遮; translate3d 强制返回键拥有自己的合成层 */
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
   border: none;
