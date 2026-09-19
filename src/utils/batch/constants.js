@@ -67,6 +67,8 @@ export const availableTasks = [
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
   { label: "一键购买梦境商品", value: "batchBuyDreamItems" },
+  { label: "玄武赐福任务奖励", value: "batchXuanwuBlessing" },
+  { label: "玄武赐福转盘抽奖", value: "batchXuanwuLottery" },
 ];
 
 // 车辆研究消耗表

@@ -27,3 +27,4 @@ export { createTasksFootball } from './tasksFootball.js';
 export { createTasksApex } from './tasksApex.js';
 export { createTasksShidian } from './tasksShidian.js';
 export { createTasksCampChallenge } from './tasksCampChallenge.js';
+export { createTasksXuanwuBlessing } from './tasksXuanwuBlessing.js';

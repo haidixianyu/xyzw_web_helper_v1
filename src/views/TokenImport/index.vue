@@ -952,7 +952,17 @@ const makeIconToggle = (keyPrefix, label) => {
     disabledIds.value = s;
     message.success(`已${next ? "关闭" : "开启"}「${token.name || token.id}」的${label}（下次打开游戏生效）`);
   };
-  return { enabled, toggle };
+  // 批量设置：同时写 localStorage 与内存状态
+  const setMany = (tokenIds, nextEnabled) => {
+    const s = new Set(disabledIds.value);
+    tokenIds.forEach((id) => {
+      localStorage.setItem(`${keyPrefix}:${id}`, nextEnabled ? "1" : "0");
+      if (nextEnabled) s.delete(id);
+      else s.add(id);
+    });
+    disabledIds.value = s;
+  };
+  return { enabled, toggle, setMany, label };
 };
 const snowIcon = makeIconToggle("snow_icon_enabled", "❄️雪花图标");
 const zoomIcon = makeIconToggle("zoom_icon_enabled", "🔍缩放图标");
@@ -985,7 +995,8 @@ const getTargetTokens = () => {
   return tokenStore.gameTokens.filter((t) => ids.has(t.id));
 };
 
-// 导出目标：以列表中勾选的账号为准（分组点选会同步勾选账号）；一个都没勾选时返回全部
+// 勾选优先的目标账号：以列表中勾选的账号为准（分组点选会同步勾选账号）；一个都没勾选时返回全部
+// 导出与批量图标显隐开关共用此范围
 const getExportTargetTokens = () => {
   const ids = multiGameSelectedTokenIds.value;
   if (ids.size === 0) return tokenStore.gameTokens;
@@ -1187,15 +1198,20 @@ const editRules = {
   token: [{ required: true, message: "请输入Token字符串", trigger: "blur" }],
 };
 
-const bulkOptions = [
+// 雪花/放大镜批量项文字：目标账号全部已开启时显示"关闭X"，否则显示"开启X"
+const iconToggleLabel = (icon, emoji) => {
+  const targets = getExportTargetTokens();
+  const allEnabled =
+    targets.length > 0 && targets.every((t) => icon.enabled(t.id));
+  return `${allEnabled ? "关闭" : "开启"}${emoji}`;
+};
+
+const bulkOptions = computed(() => [
   { label: "刷新所有Token", key: "refreshAll" },
   { label: "更新token信息", key: "updateInfo" },
   { type: "divider" },
-  { label: "导出Token", key: "export" },
-  { label: "导入Token", key: "import" },
-  { type: "divider" },
-  { label: "导出BIN", key: "exportBin" },
-  { label: "导入BIN", key: "importBin" },
+  { label: iconToggleLabel(snowIcon, "❄️图标"), key: "toggleSnowIcon" },
+  { label: iconToggleLabel(zoomIcon, "🔍图标"), key: "toggleZoomIcon" },
   { type: "divider" },
   { label: "导出Token和BIN", key: "exportWithBin" },
   { label: "导入Token和BIN", key: "importWithBin" },
@@ -1203,7 +1219,7 @@ const bulkOptions = [
   { label: "清理过期Token", key: "clean" },
   { label: "断开所有连接", key: "disconnect" },
   { label: "清除所有Token", key: "clear" },
-];
+]);
 
 /**
  * 手动打开Token管理卡片
@@ -1780,6 +1796,12 @@ const handleBulkAction = (key) => {
     case "importWithBin":
       importTokenFile();
       break;
+    case "toggleSnowIcon":
+      toggleIconEnabledBulk(snowIcon);
+      break;
+    case "toggleZoomIcon":
+      toggleIconEnabledBulk(zoomIcon);
+      break;
     case "clean":
       cleanExpiredTokens();
       break;
@@ -1790,6 +1812,24 @@ const handleBulkAction = (key) => {
       clearAllTokens();
       break;
   }
+};
+
+// 批量切换游戏内悬浮图标(雪花/放大镜)显隐：已勾选账号时仅作用于勾选账号，未勾选时作用于全部账号
+// 目标账号全部已开启 -> 关闭全部；否则 -> 开启全部
+const toggleIconEnabledBulk = (icon) => {
+  const targets = getExportTargetTokens();
+  if (targets.length === 0) {
+    message.warning("没有可设置的Token");
+    return;
+  }
+  const nextEnabled = !targets.every((t) => icon.enabled(t.id));
+  icon.setMany(
+    targets.map((t) => t.id),
+    nextEnabled,
+  );
+  message.success(
+    `已${nextEnabled ? "开启" : "关闭"} ${targets.length} 个账号的${icon.label}（下次打开游戏生效）`,
+  );
 };
 
 const exportTokens = async () => {
@@ -2415,15 +2455,21 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-/* 控制台入口: 固定在头部左侧 */
+/* 控制台入口: 固定在视口左上角, 跟随页面滚动始终停留在当前可见区域顶部。
+   宽屏(>1200px)时与 .container 左边缘对齐, 窄屏时贴安全区。 */
 .console-entry-btn {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  position: fixed;
+  left: max(
+    calc(var(--spacing-lg) + env(safe-area-inset-left, 0px)),
+    calc((100vw - 1200px) / 2 + var(--spacing-lg))
+  );
+  top: calc(var(--spacing-lg) + env(safe-area-inset-top, 0px));
+  transform: none;
+  z-index: var(--z-sticky);
   color: #fff;
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: var(--border-radius-medium, 8px);
   padding: 4px 10px;

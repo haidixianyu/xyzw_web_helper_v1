@@ -21,7 +21,7 @@ const router = useRouter()
 const gameSrc = import.meta.env.BASE_URL + 'game/index.html'
 
 function goBack() {
-  router.push('/admin/dashboard')
+  router.push('/tokens')
 }
 
 // 游戏路由期间把宿主页面刷黑并锁死滚动, 避免 iOS 上 iframe 重绘白闪时露出浅色

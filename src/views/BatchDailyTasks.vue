@@ -611,6 +611,25 @@
                     十殿转盘
                   </n-button>
                 </n-space>
+
+                <!-- 玄武赐福 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">玄武赐福</span>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchXuanwuBlessing"
+                  >
+                    任务奖励
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchXuanwuLottery"
+                  >
+                    转盘抽奖
+                  </n-button>
+                </n-space>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="quickMon" tab="周一">
@@ -3371,6 +3390,7 @@ import {
   createTasksApex,
   createTasksShidian,
   createTasksCampChallenge,
+  createTasksXuanwuBlessing,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -4496,6 +4516,8 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
+      "batchXuanwuBlessing",
+      "batchXuanwuLottery",
     ],
   },
   {
@@ -7362,6 +7384,9 @@ const { batchShidianReward } = tasksShidian;
 
 const tasksCampChallenge = createTasksCampChallenge(createTaskDeps());
 const { batchCampChallenge, batchCampChallengePet, batchCampClaimTasks } = tasksCampChallenge;
+
+const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
+const { batchXuanwuBlessing, batchXuanwuLottery } = tasksXuanwuBlessing;
 
 // 营地挑战模式选择
 const campChallengeMode = ref("pet");
