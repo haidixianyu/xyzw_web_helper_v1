@@ -62,7 +62,7 @@
   window.__XYZW_WS_CAPTURE__ = true;
 
   var CAP = [];
-  var MAX = 800;
+  var MAX = 400;
   var AUTO_RE = /异常|客户端|封禁|illegal|forbidden/i;
 
   function now() {
@@ -233,7 +233,7 @@
               k: "<<",
               cmd: e.cmd,
               code: e.code,
-              data: data === undefined || data === null ? null : brief(data, 1200),
+              data: data === undefined || data === null ? null : brief(data, 8000),
             });
           }
         } catch (_) {}

@@ -816,6 +816,11 @@ export async function runSaltFieldBattle(tokenId, token, options = {}, deps = {}
         type: "info",
       });
       battleClient.send("war_enterbattlefield", { battlefieldId, useGzip: true });
+      await sleep(commandDelay);
+      // 参考实现(huahuichin/xyzw_web_helper aaf9b12)的进场有两条路径: 连接时 gzip 进场 + 每轮非 gzip 进场。
+      // 本工具无法解压 gzip 响应体(游戏内 _onEnterBattlefieldGZip 用 pako inflate), 若服务端不接受
+      // gzip 变体就会整场进不去, 而盐场每周六才开一次, 因此这里两条路径都发, 保证能进场
+      battleClient.send("war_enterbattlefield", { battlefieldId });
       // 等待进场确认: 轮询战场快照, 确认自己角色已进入战场(出现在 roles 中)
       let entered = false;
       for (let i = 0; i < 6 && !entered && !shouldStop(); i++) {

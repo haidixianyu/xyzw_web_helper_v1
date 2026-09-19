@@ -358,6 +358,15 @@ export function registerDefaultCommands(reg) {
     .register("legion_getpayloadkillrecord")
     .register("legion_getpayloadbf")
     .register("legion_getpayloadrecord")
+    // 蟠桃园-战斗操作
+    // 注意: 未注册的命令会在 CommandRegistry.build 抛 "Unknown cmd", 被发送队列静默吞掉,
+    // 表现为"点了开始蟠桃园监控但游戏内毫无反应", 故战斗流程用到的命令必须全部注册
+    .register("payload_enterbf") // 进战场 (Payload_EnterBfResp)
+    .register("payload_getteaminfo") // 查询队伍 (Payload_GetTeamInfoResp)
+    .register("payload_setbattleteam") // 布阵参赛 (Payload_SetBattleTeamResp)
+    .register("payload_startmarch") // 行军 (Payload_StartMarchResp)
+    .register("payload_startbattle") // 攻击目标 (Payload_StartBattleResp)
+    .register("payload_ping") // 战场心跳保活
     .register("warguess_getrank")
     .register("warguess_startguess")
     .register("warguess_getguesscoinreward")
@@ -416,6 +425,7 @@ export function registerDefaultCommands(reg) {
 
     // 咸王宝库
     .register("matchteam_getroleteaminfo")
+    .register("matchteam_getteaminfo")
     .register("matchteam_create")
     .register("matchteam_join")
     .register("matchteam_memberprepare")
@@ -1180,6 +1190,7 @@ export class XyzwWebSocketClient {
       pearl_unloadskillresp: "pearl_unloadskill",
       // 咸王宝库
       matchteam_getroleteaminforesp: "matchteam_getroleteaminfo",
+      matchteam_getteaminforesp: "matchteam_getteaminfo",
       bosstower_getinforesp: "bosstower_getinfo",
       bosstower_startbossresp: "bosstower_startboss",
       bosstower_startboxresp: "bosstower_startbox",

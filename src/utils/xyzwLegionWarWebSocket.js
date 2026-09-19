@@ -96,6 +96,17 @@
      //盐场-获取战场信息
      .register("war_getbattlefieldinfo")
      .register("war_enterbattlefield")
+     //盐场-战斗操作
+     // 注意: 未注册的命令会在 CommandRegistry.build 抛 "Unknown cmd", 被发送队列静默吞掉,
+     // 表现为"点了开始盐场战斗但游戏内毫无反应", 故战斗流程用到的命令必须全部注册
+     .register("war_setbattleteam") // 布阵参赛 (War_SetBattleTeamResp)
+     .register("war_invitejointeam") // 邀请成员入队 (War_InviteJoinTeamResp)
+     .register("war_startmarch") // 行军 (War_StartMarchResp)
+     .register("war_startbattle") // 攻击玩家 (War_StartBattleResp)
+     .register("war_startattackbuilding") // 攻击建筑 (War_StartAttackBuildingResp)
+     .register("war_speedup") // 行军加速 (War_SpeedUpResp)
+     .register("war_resurrect") // 复活 (War_ResurrectNotify)
+     .register("war_getteaminfo") // 查询队伍 (War_GetTeamInfoResp, 参数 roleCodeId)
    
    return registry
  }

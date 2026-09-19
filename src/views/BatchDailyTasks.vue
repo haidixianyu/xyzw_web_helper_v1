@@ -222,6 +222,21 @@
                 </n-button>
                 <n-button
                   size="small"
+                  type="success"
+                  ghost
+                  :loading="starInfoLoading"
+                  :disabled="starInfoLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchStarInfo"
+                >
+                  星级信息
+                  <template #icon v-if="starInfoLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
                   type="warning"
                   ghost
                   :loading="fullInfoLoading"
@@ -1171,6 +1186,25 @@
             >
               <span class="time">{{ log.time }}</span>
               <span class="message">{{ log.message }}</span>
+              <div v-if="log.table" class="log-table-wrap">
+                <div class="log-table-header">{{ log.table.header }}</div>
+                <table class="log-table">
+                  <thead>
+                    <tr>
+                      <th v-for="col in log.table.columns" :key="col">
+                        {{ col }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, rowIndex) in log.table.rows" :key="rowIndex">
+                      <td v-for="(cell, cellIndex) in row" :key="cellIndex">
+                        {{ cell }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </n-card>
@@ -3796,6 +3830,7 @@ const fetchShidianOverview = async () => {
     message: `=== 开始查询十殿信息(${targetIds.length}个账号) ===`,
     type: "info",
   });
+  const rows = [];
   try {
     for (const tokenId of targetIds) {
       if (shouldStop.value) break;
@@ -3826,13 +3861,8 @@ const fetchShidianOverview = async () => {
             }
           }
         }
-        const currentLevel = Number(res?.nightmare?.level) || 0;
         shidianOverview.value = { ...shidianOverview.value, [tokenId]: finalLevel };
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${name} 十殿信息：本周已打到 ${finalLevel} 层（当前殿级 ${currentLevel}）`,
-          type: finalLevel < 8 ? "warning" : "success",
-        });
+        rows.push([name, finalLevel < 8 ? `${finalLevel} ⚠️` : `${finalLevel}`]);
       } catch (e) {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -3846,6 +3876,18 @@ const fetchShidianOverview = async () => {
     }
   } finally {
     shidianInfoLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【十殿信息】${rows.length} 个账号`,
+        table: {
+          header: "本周已打到的最高层数（⚠️ 未满 8 层）",
+          columns: ["账号", "本周层数"],
+          rows,
+        },
+        type: "info",
+      });
+    }
     addLog({
       time: new Date().toLocaleTimeString(),
       message: `=== 十殿信息查询完成 ===`,
@@ -3870,6 +3912,12 @@ const deepFindKey = (obj, key, depth = 0) => {
   return undefined;
 };
 
+// 数值按「万」显示，保留 1 位小数（如 50000 → 5.0w）
+const formatWan = (value) => {
+  const n = Number(value) || 0;
+  return `${(n / 10000).toFixed(1)}w`;
+};
+
 // 查询选中账号的消耗活动进度并写入日志（读取 activity_get 的 commonActivityInfo）
 const fetchConsumptionInfo = async () => {
   const targetIds =
@@ -3886,6 +3934,10 @@ const fetchConsumptionInfo = async () => {
     message: `=== 开始查询消耗信息(${targetIds.length}个账号) ===`,
     type: "info",
   });
+  const weekType = currentWeekType.value;
+  const isBoxWeek = weekType === "宝箱周";
+  const isRecruitWeek = weekType === "招募周";
+  const rows = [];
   try {
     for (const tokenId of targetIds) {
       if (shouldStop.value) break;
@@ -3896,10 +3948,9 @@ const fetchConsumptionInfo = async () => {
         // 拉取角色信息：金砖库存 + 本周活动消耗
         const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const diamond = roleInfo?.role?.diamond ?? 0;
-        const weekType = currentWeekType.value;
 
         // 宝箱周：宝箱消耗(activity:open:box) + 白玉消耗(wa:wd)，递归查找兼容字段位置
-        if (weekType === "宝箱周") {
+        if (isBoxWeek) {
           const boxConsumption =
             Number(deepFindKey(roleInfo, "activity:open:box")) || 0;
           const wdConsumption = Number(deepFindKey(roleInfo, "wa:wd")) || 0;
@@ -3914,10 +3965,6 @@ const fetchConsumptionInfo = async () => {
           const boxCurrentTier = boxReached
             ? `${boxReached}`
             : "未达到最低档";
-          const boxNextTierObj = boxTiers.find((t) => t > boxConsumption);
-          const boxNextInfo = boxNextTierObj
-            ? `${boxNextTierObj}（差 ${Math.max(0, boxNextTierObj - boxConsumption)}）`
-            : "已满档";
 
           // 白玉达标档位：10w-100w、125w、150w
           const wdTiers = [
@@ -3932,19 +3979,17 @@ const fetchConsumptionInfo = async () => {
           const wdCurrentTier = wdReached
             ? `${wdReached / 10000}w`
             : "未达到最低档";
-          const wdNextTierObj = wdTiers.find((t) => t > wdConsumption);
-          const wdNextInfo = wdNextTierObj
-            ? `${wdNextTierObj / 10000}w（差 ${Math.max(0, wdNextTierObj - wdConsumption)}）`
-            : "已满档";
 
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${name} 消耗信息：宝箱消耗(宝箱达标)${boxConsumption}，当前达到档位：${boxCurrentTier}，下一档：${boxNextInfo}；白玉消耗(白玉达标)${wdConsumption}，当前达到档位：${wdCurrentTier}，下一档：${wdNextInfo}；当前金砖(库存)${diamond}`,
-            type: "success",
-          });
+          rows.push([
+            name,
+            `${boxConsumption}`,
+            boxCurrentTier,
+            `${wdConsumption}`,
+            wdCurrentTier,
+            formatWan(diamond),
+          ]);
         } else {
           // 招募周显示贝壳消耗(wa:pearl)，其余周维持金砖消耗(wa:diamond)
-          const isRecruitWeek = weekType === "招募周";
           const weekConsumption =
             Number(
               deepFindKey(roleInfo, isRecruitWeek ? "wa:pearl" : "wa:diamond"),
@@ -3965,11 +4010,13 @@ const fetchConsumptionInfo = async () => {
           const nextInfo = nextTierObj
             ? `${nextTierObj}（差 ${Math.max(0, nextTierObj - weekConsumption)}）`
             : "已满档";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${name} 消耗信息：本周${isRecruitWeek ? "贝壳" : "金砖"}消耗(${isRecruitWeek ? "招募达标" : "黑市达标"})${weekConsumption}，当前达到档位：${currentTier}，下一档：${nextInfo}，当前金砖(库存)${diamond}`,
-            type: "success",
-          });
+          rows.push([
+            name,
+            `${weekConsumption}`,
+            currentTier,
+            nextInfo,
+            formatWan(diamond),
+          ]);
         }
       } catch (e) {
         addLog({
@@ -3984,6 +4031,28 @@ const fetchConsumptionInfo = async () => {
     }
   } finally {
     consumptionInfoLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【消耗信息】${weekType} · ${rows.length} 个账号`,
+        table: {
+          header: isBoxWeek
+            ? "本周消耗与达标档位"
+            : `本周${isRecruitWeek ? "贝壳" : "金砖"}消耗与达标档位`,
+          columns: isBoxWeek
+            ? ["账号", "宝箱消耗", "宝箱档位", "白玉消耗", "白玉档位", "金砖"]
+            : [
+                "账号",
+                isRecruitWeek ? "贝壳消耗" : "金砖消耗",
+                "当前档位",
+                "下一档",
+                "金砖",
+              ],
+          rows,
+        },
+        type: "info",
+      });
+    }
     addLog({
       time: new Date().toLocaleTimeString(),
       message: `=== 消耗信息查询完成 ===`,
@@ -4060,6 +4129,7 @@ const refreshTokenPower = async () => {
   isRefreshingPower.value = true;
   let successCount = 0;
   let failCount = 0;
+  const rows = [];
 
   // 串行处理，受连接池限流（avoidConnectionSlot 内部已限制并发）
   for (const tokenId of targetIds) {
@@ -4075,6 +4145,7 @@ const refreshTokenPower = async () => {
       const roleData = roleInfoResp?.role || roleInfoResp?.roleInfo;
       const power = roleData?.power ?? roleData?.role?.power ?? 0;
       updateTokenPower(tokenId, power);
+      rows.push([token.name || tokenId, formatPower(power)]);
       successCount++;
     } catch (e) {
       failCount++;
@@ -4091,6 +4162,18 @@ const refreshTokenPower = async () => {
   }
 
   isRefreshingPower.value = false;
+  if (rows.length > 0) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `【战力信息】${rows.length} 个账号`,
+      table: {
+        header: "角色战斗力",
+        columns: ["账号", "战力"],
+        rows,
+      },
+      type: "info",
+    });
+  }
   message.success(`刷新战力完成: 成功 ${successCount}，失败 ${failCount}`);
 };
 
@@ -6764,7 +6847,15 @@ const copyLogs = () => {
     return;
   }
   const logText = logs.value
-    .map((log) => `${log.time} ${log.message}`)
+    .map((log) => {
+      let text = `${log.time} ${log.message}`;
+      if (log.table) {
+        text += `\n${log.table.header}`;
+        text += `\n${log.table.columns.join("\t")}`;
+        text += `\n${log.table.rows.map((row) => row.join("\t")).join("\n")}`;
+      }
+      return text;
+    })
     .join("\n");
   navigator.clipboard
     .writeText(logText)
@@ -7260,6 +7351,207 @@ const fetchFullInfo = async () => {
 
   fullInfoLoading.value = false;
   message.success(`原始数据查询完成: 成功 ${successCount}，失败 ${failCount}`);
+};
+
+// ==================== 星级信息 ====================
+const starInfoLoading = ref(false);
+
+// 取出成员 extParam 中最新一期星数键（形如 nmExtStarCnt_260914，后缀是本周起始日）
+const pickStarKey = (extParam) => {
+  if (!extParam || typeof extParam !== "object") return "";
+  const keys = Object.keys(extParam)
+    .filter((k) => k.startsWith("nmExtStarCnt_"))
+    .sort();
+  return keys.length > 0 ? keys[keys.length - 1] : "";
+};
+
+// 从成员 extParam 中解析星数（取最新一期的值）
+const pickStarCount = (extParam) => {
+  const key = pickStarKey(extParam);
+  if (!key) return 0;
+  const value = Number(extParam[key]);
+  return Number.isFinite(value) ? value : 0;
+};
+
+// 星数键后缀(如 260914)即本周起始日，返回该日 UTC+8 零点的秒级时间戳
+// 例: nmExtStarCnt_260914 → 2026-09-14 00:00(+08:00) = 1789315200，与 nmext_getinfo 的 starResetTime 一致
+const parseStarWeekStart = (starKey) => {
+  const m = /^nmExtStarCnt_(\d{2})(\d{2})(\d{2})$/.exec(starKey || "");
+  if (!m) return 0;
+  const year = 2000 + Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  return Date.UTC(year, month, day) / 1000 - 8 * 3600;
+};
+
+// 把单支队伍的成员整理成日志内可渲染的表格（队长用图标前缀区分，未录入星数用 ⚠️ 标记）
+const buildStarTeamTable = (team, selectedNamesStr) => {
+  const unrecordedCount = team.members.filter((m) => !m.recorded).length;
+  return {
+    header:
+      `队伍号 ${team.teamId}　|　成员${team.members.length}人　|　生效星数 ${team.totalStar}` +
+      (unrecordedCount > 0
+        ? `　|　未生效星数 ${team.unrecordedStar}　|　⚠️ 未录入 ${unrecordedCount} 人`
+        : "") +
+      (selectedNamesStr ? `　|　本页选中: ${selectedNamesStr}` : ""),
+    columns: ["成员", "星数"],
+    rows: team.members.map((m) => [
+      `${m.isLeader ? "👑 " : ""}${m.name}`,
+      m.recorded ? `${m.star}` : `${m.star} ⚠️`,
+    ]),
+  };
+};
+
+// 查询选中账号的星级信息：同一连接内取队伍号并拉取成员详情，按队伍号去重成表，结果以表格写入日志
+const fetchStarInfo = async () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择要查询的账号");
+    return;
+  }
+
+  const targetIds = [...selectedTokens.value];
+  starInfoLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询星级信息(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+
+  const teams = [];
+  const teamIndex = new Map(); // teamId -> teams 下标
+  const teamTokens = new Map(); // teamId -> Set<tokenId>
+  const noTeam = [];
+  let failCount = 0;
+
+  const selectedNamesOf = (tokenIdSet) =>
+    [...tokenIdSet].map((id) => tokens.value.find((t) => t.id === id)?.name || id);
+
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const roleId = roleInfo?.role?.roleId
+          ? String(roleInfo.role.roleId)
+          : tokenId;
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "matchteam_getroleteaminfo",
+          { roleID: parseInt(roleId) },
+          8000,
+        );
+        const gDMTData = res?.roleMTData?.gDMTData || res?.gDMTData || {};
+        const teamIds = Object.keys(gDMTData).filter((id) => id);
+        if (teamIds.length === 0) {
+          noTeam.push({ tokenName: name, roleId });
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 未加入任何队伍`,
+            type: "warning",
+          });
+          continue;
+        }
+
+        for (const teamId of teamIds) {
+          if (!teamTokens.has(teamId)) teamTokens.set(teamId, new Set());
+          const tokenIdSet = teamTokens.get(teamId);
+          tokenIdSet.add(tokenId);
+
+          // 该队伍已查过，只补充本页选中账号
+          const existedIdx = teamIndex.get(teamId);
+          if (existedIdx !== undefined) {
+            teams[existedIdx].selectedNames = selectedNamesOf(tokenIdSet);
+            continue;
+          }
+
+          // 复用当前连接拉取成员，避免二次建连失败
+          const teamRes = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "matchteam_getteaminfo",
+            { teamId },
+            8000,
+          );
+          const info = teamRes?.teamInfo || teamRes || {};
+          const rawMembers = info.fightRoleBase || [];
+          // 本周起点：取全队成员中最新的星数键换算（各成员键一致，取最新即可）
+          const weekStart = parseStarWeekStart(
+            rawMembers
+              .map((m) => pickStarKey(m.extParam))
+              .filter(Boolean)
+              .sort()
+              .pop() || "",
+          );
+          const members = rawMembers.map((m) => ({
+            name: m.name || String(m.roleId),
+            star: pickStarCount(m.extParam),
+            isLeader: String(m.roleId) === String(info.leaderId),
+            // lockedTime 是本周星数锁定时刻：早于本周起点说明本周未录入，星数不生效
+            recorded: !weekStart || Number(m.lockedTime) >= weekStart,
+          }));
+          members.sort((a, b) => b.star - a.star);
+          const team = {
+            teamId: info.teamId || teamId,
+            totalStar: members
+              .filter((m) => m.recorded)
+              .reduce((sum, m) => sum + m.star, 0),
+            unrecordedStar: members
+              .filter((m) => !m.recorded)
+              .reduce((sum, m) => sum + m.star, 0),
+            selectedNames: selectedNamesOf(tokenIdSet),
+            members,
+          };
+          teamIndex.set(teamId, teams.length);
+          teams.push(team);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `已获取队伍 ${team.teamId}（${members.length} 名成员，${team.totalStar} 星）`,
+            type: "info",
+          });
+        }
+      } catch (e) {
+        failCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 星级信息查询失败: ${e?.message || e}`,
+          type: "warning",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+
+    // 全部账号查询完成后统一出表（同一队伍号的选中账号此时已合并）
+    teams.sort((a, b) => b.totalStar - a.totalStar);
+    for (const team of teams) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【星级信息】队伍 ${team.teamId}`,
+        type: "success",
+        table: buildStarTeamTable(team, team.selectedNames.join("、")),
+      });
+    }
+    if (noTeam.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `未加入任何队伍(${noTeam.length}): ${noTeam.map((n) => `${n.tokenName}(${n.roleId})`).join("、")}`,
+        type: "warning",
+      });
+    }
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 星级信息查询完成: ${teams.length} 个队伍，${noTeam.length} 个账号未入队，失败 ${failCount} ===`,
+      type: "info",
+    });
+    message.success(
+      `星级信息查询完成: ${teams.length} 个队伍，失败 ${failCount}（详见日志）`,
+    );
+  } finally {
+    starInfoLoading.value = false;
+  }
 };
 
 const createTaskDeps = () => ({
@@ -8024,6 +8316,51 @@ const stopBatch = () => {
 
 .batch-count-input {
   width: 90px !important;
+}
+
+/* 日志内表格（星级信息等） */
+.log-table-wrap {
+  margin: 4px 0 8px;
+}
+
+.log-table-header {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: #333;
+  table-layout: auto;
+}
+
+.log-table th,
+.log-table td {
+  border: 1px solid #ddd;
+  padding: 2px 6px;
+  text-align: left;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.log-table th {
+  background: #e9e9e9;
+  font-weight: 600;
+}
+
+/* 移动端：收紧表格字号与内边距，避免横向溢出 */
+@media (max-width: 768px) {
+  .log-table th,
+  .log-table td {
+    padding: 2px 4px;
+    font-size: 11px;
+  }
 }
 
 .weird-tower-count-unit {
