@@ -621,6 +621,20 @@
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchApexClaimRewards(apexScheduleId)"
+                  >
+                    逐鹿领奖
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="showApexVoteModal = true"
+                  >
+                    逐鹿助威
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
                     @click="batchShidianReward"
                   >
                     十殿转盘
@@ -1286,6 +1300,28 @@
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
           <n-button type="primary" @click="saveSettings">保存设置</n-button>
         </div>
+      </div>
+    </n-modal>
+
+    <!-- 逐鹿助威票数选择 -->
+    <n-modal
+      v-model:show="showApexVoteModal"
+      preset="card"
+      title="逐鹿助威 - 选择票数"
+      style="width: 90%; max-width: 360px"
+      :auto-focus="false"
+    >
+      <div class="apex-vote-options">
+        <n-button
+          v-for="cnt in APEX_VOTE_OPTIONS"
+          :key="cnt"
+          type="primary"
+          secondary
+          size="large"
+          @click="startApexVote(cnt)"
+        >
+          {{ cnt }} 票
+        </n-button>
       </div>
     </n-modal>
 
@@ -5948,6 +5984,9 @@ const queryRecipientInfo = async () => {
   } finally {
     isQueryingRecipient.value = false;
 
+    // 释放连接槽位（与 ensureConnection 中 waitForConnectionSlot 配对）
+    releaseConnectionSlot();
+
     // 记录查询完成
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -7043,8 +7082,8 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     }
 
     if (!connected) {
-      // 连接失败，释放槽位
-      releaseConnectionSlot();
+      // 连接失败：槽位由调用方 finally 中的 releaseConnectionSlot 统一释放，
+      // 此处不再重复释放（否则 active 会被多减一次，导致并发上限失效）
       const info = tokenStore.getConnectionInfo?.(tokenId);
       const reason = formatConnectionFailure(tokenId, info);
       addLog({
@@ -7669,7 +7708,7 @@ const tasksFootball = createTasksFootball(createTaskDeps());
 const { batchFootballBet } = tasksFootball;
 
 const tasksApex = createTasksApex(createTaskDeps());
-const { batchApexGuess } = tasksApex;
+const { batchApexGuess, batchApexClaimRewards, batchApexVote } = tasksApex;
 
 const tasksShidian = createTasksShidian(createTaskDeps());
 const { batchShidianReward } = tasksShidian;
@@ -7704,6 +7743,12 @@ const onCampChallengeModeChange = async (val) => {
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);
 const apexScheduleId = ref(0);
+const showApexVoteModal = ref(false);
+const APEX_VOTE_OPTIONS = [1, 5, 10];
+const startApexVote = (cnt) => {
+  showApexVoteModal.value = false;
+  batchApexVote("", cnt);
+};
 const footballPickOptions = [
   { label: "主胜", value: 1 },
   { label: "平局", value: 2 },
@@ -8316,6 +8361,16 @@ const stopBatch = () => {
 
 .batch-count-input {
   width: 90px !important;
+}
+
+/* 逐鹿助威票数选择 */
+.apex-vote-options {
+  display: flex;
+  gap: 10px;
+}
+
+.apex-vote-options .n-button {
+  flex: 1;
 }
 
 /* 日志内表格（星级信息等） */
