@@ -6304,20 +6304,17 @@ const updateTaskTemplate = () => {
 };
 
 const deleteTaskTemplate = (templateId) => {
-  // 确认删除
-  if (confirm("确定要删除这个模板吗？")) {
-    // 找到并删除模板
-    const templates = loadTaskTemplates();
-    const filteredTemplates = templates.filter((t) => t.id !== templateId);
+  // 直接删除（原生 confirm 在移动端 WebView 不返回，会导致点击无反应）
+  const templates = loadTaskTemplates();
+  const filteredTemplates = templates.filter((t) => t.id !== templateId);
 
-    // 保存模板到localStorage
-    localStorage.setItem("task-templates", JSON.stringify(filteredTemplates));
+  // 保存模板到localStorage
+  localStorage.setItem("task-templates", JSON.stringify(filteredTemplates));
 
-    // 更新模板列表
-    taskTemplates.value = filteredTemplates;
+  // 更新模板列表
+  taskTemplates.value = filteredTemplates;
 
-    message.success("模板已删除");
-  }
+  message.success("模板已删除");
 };
 
 const resetTemplateForm = () => {
@@ -6574,10 +6571,9 @@ const deselectAllNewGroup = () => {
  * 删除分组
  */
 const deleteGroup = (groupId) => {
-  if (confirm("确定要删除这个分组吗？分组中的token不会被删除。")) {
-    tokenStore.deleteTokenGroup(groupId);
-    message.success("分组已删除");
-  }
+  // 直接删除（原生 confirm 在移动端 WebView 不返回，会导致点击无反应）
+  tokenStore.deleteTokenGroup(groupId);
+  message.success("分组已删除");
 };
 
 /**
