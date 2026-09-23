@@ -656,7 +656,14 @@
                     :disabled="isRunning || selectedTokens.length === 0"
                     @click="batchXuanwuLottery"
                   >
-                    转盘抽奖
+                    连续抽奖
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchXuanwuSingleLottery"
+                  >
+                    单次抽奖
                   </n-button>
                 </n-space>
               </n-space>
@@ -4637,6 +4644,7 @@ const taskGroupDefinitions = [
       "batchGenieSweep",
       "batchXuanwuBlessing",
       "batchXuanwuLottery",
+      "batchXuanwuSingleLottery",
     ],
   },
   {
@@ -6224,13 +6232,6 @@ const applyTemplateToAll = (template) => {
     message.error("当前没有可用账号");
     return;
   }
-  if (
-    !confirm(
-      `确定将模板「${template.name}」应用到全部 ${allTokenIds.length} 个账号吗？\n这将覆盖所有账号现有的任务配置。`,
-    )
-  ) {
-    return;
-  }
 
   let successCount = 0;
   allTokenIds.forEach((tokenId) => {
@@ -7717,7 +7718,8 @@ const tasksCampChallenge = createTasksCampChallenge(createTaskDeps());
 const { batchCampChallenge, batchCampChallengePet, batchCampClaimTasks } = tasksCampChallenge;
 
 const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
-const { batchXuanwuBlessing, batchXuanwuLottery } = tasksXuanwuBlessing;
+const { batchXuanwuBlessing, batchXuanwuLottery, batchXuanwuSingleLottery } =
+  tasksXuanwuBlessing;
 
 // 营地挑战模式选择
 const campChallengeMode = ref("pet");

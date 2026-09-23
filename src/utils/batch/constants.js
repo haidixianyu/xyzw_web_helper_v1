@@ -68,7 +68,8 @@ export const availableTasks = [
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
   { label: "一键购买梦境商品", value: "batchBuyDreamItems" },
   { label: "玄武赐福任务奖励", value: "batchXuanwuBlessing" },
-  { label: "玄武赐福转盘抽奖", value: "batchXuanwuLottery" },
+  { label: "玄武赐福连续抽奖", value: "batchXuanwuLottery" },
+  { label: "玄武赐福单次抽奖", value: "batchXuanwuSingleLottery" },
 ];
 
 // 车辆研究消耗表
