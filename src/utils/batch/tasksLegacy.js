@@ -56,6 +56,35 @@ export function createTasksLegacy(deps) {
         });
         await ensureConnection(tokenId);
 
+        // 功法探索(挂机)未开启时无法领取功法券，先自动开启；
+        // 刚开启时服务端无累积奖励，立即领取会报 12400000「挂机奖励领取过于频繁」，故本次跳过领取
+        const legacyInfo = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "legacy_getinfo",
+          {},
+          5000,
+        );
+        if (!legacyInfo?.roleLegacy?.hangUpBeginTime) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${token.name} 功法探索未开启，正在自动开启 ===`,
+            type: "info",
+          });
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "legacy_beginhangup",
+            {},
+            5000,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${token.name} 已开启功法探索，刚开启暂无累积奖励，本次跳过领取 ===`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
         const LegacyClaimHangUpResp = await tokenStore.sendMessageWithPromise(
           tokenId,
           "legacy_claimhangup",
@@ -64,7 +93,9 @@ export function createTasksLegacy(deps) {
         );
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 成功领取功法残卷${LegacyClaimHangUpResp.reward[0].value}，共有${LegacyClaimHangUpResp.role.items[37007].quantity}个`,
+          message: `=== ${token.name} 成功领取功法残卷${LegacyClaimHangUpResp?.reward?.[0]?.value ?? 0}，共有${
+            LegacyClaimHangUpResp?.role?.items?.[37007]?.quantity ?? 0
+          }个`,
           type: "success",
         });
         tokenStatus.value[tokenId] = "completed";

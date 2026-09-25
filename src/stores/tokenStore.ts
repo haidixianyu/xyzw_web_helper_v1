@@ -816,7 +816,7 @@ export const useTokenStore = defineStore("tokens", () => {
         }
       };
 
-      wsClient.onDisconnect = async (event) => {
+      wsClient.onDisconnect = async (event, opts = {}) => {
         const reason = event.code === 1006 ? "异常断开" : event.reason || "";
         wsLogger.wsDisconnect(tokenId, reason);
         if (wsConnections.value[tokenId]) {
@@ -826,7 +826,8 @@ export const useTokenStore = defineStore("tokens", () => {
 
           // 如果连接异常断开(1006)且从未连接成功(握手失败)，尝试刷新Token
           // connectedAt 为 null 表示 socket.onopen 还没触发就断开了，通常意味着握手失败（如403 Forbidden）
-          if (event.code === 1006 && !conn.connectedAt) {
+          // 主动关闭(closeWebSocketConnection)不算握手失败，否则会与批量页的重连逻辑抢占连接锁
+          if (!opts.intentional && event.code === 1006 && !conn.connectedAt) {
             wsLogger.warn(`检测到握手失败(1006)，尝试刷新Token [${tokenId}]`);
             // 强制刷新并重连
             await attemptTokenRefresh(tokenId, true);

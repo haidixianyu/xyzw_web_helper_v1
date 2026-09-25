@@ -715,17 +715,36 @@ export class DailyTaskRunner {
       },
     );
 
-    // 功法券领取
+    // 功法券领取（探索未开启则先开启，刚开启时本次跳过领取）
     taskList.push({
       name: "领取功法券",
-      execute: () =>
-        this.executeGameCommand(
+      execute: async () => {
+        const legacyInfo = await this.executeGameCommand(
+          tokenId,
+          "legacy_getinfo",
+          {},
+          "查询功法探索状态",
+          5000,
+        );
+        if (!legacyInfo?.roleLegacy?.hangUpBeginTime) {
+          await this.executeGameCommand(
+            tokenId,
+            "legacy_beginhangup",
+            {},
+            "开启功法探索",
+            5000,
+          );
+          this.log("已开启功法探索，刚开启暂无累积奖励，本次跳过领取", "warning");
+          return;
+        }
+        await this.executeGameCommand(
           tokenId,
           "legacy_claimhangup",
           {},
           "领取功法券",
           5000,
-        ),
+        );
+      },
     });
 
     // 罐子重置（停止计时 → 重新开始计时）

@@ -399,6 +399,7 @@ export function registerDefaultCommands(reg) {
 
     // 功法
     .register("legacy_getinfo")
+    .register("legacy_beginhangup")
     .register("legacy_claimhangup")
     // 功法残卷赠送
     .register("legacy_gift_getlist")
@@ -408,6 +409,12 @@ export function registerDefaultCommands(reg) {
     .register("role_commitpassword", { password: "", passwordType: 1 })
     // 功法残卷发送
     .register("legacy_sendgift", { itemCnt: 0, legacyUIds: [], targetId: 0 })
+
+    // 比赛房间（预约）
+    .register("pkroom_getfightroominfo")
+    .register("pkroom_getfightroomdetail", { roomId: 0 })
+    // 预约无独立响应，结果通过 syncresp(role.statistics["pk:appoint:room:id"]) 返回
+    .register("pkroom_appoint")
 
     // 装备淬炼相关
     .register("equipment_confirm", {
@@ -535,6 +542,7 @@ export class XyzwWebSocketClient {
     this.showMsg = false;
     this.connected = false;
     this.isReconnecting = false; // 重连状态标志
+    this.intentionalClose = false; // 是否由本端主动关闭(主动关闭不算握手失败)
 
     this.promises = Object.create(null);
     this.registry = registerDefaultCommands(
@@ -553,6 +561,7 @@ export class XyzwWebSocketClient {
   init() {
     wsLogger.info(`连接: ${this.url.split("?")[0]}`);
 
+    this.intentionalClose = false;
     this.socket = new WebSocket(this.url);
 
     this.socket.onopen = () => {
@@ -729,9 +738,14 @@ export class XyzwWebSocketClient {
       });
       this.connected = false;
       this._clearTimers();
-      if (this.onDisconnect) this.onDisconnect(evt);
       if (this.sendCache) {
         $CacheManager.delCache(this.url);
+      }
+      // 主动关闭(closeWebSocketConnection/disconnect)会导致 1006 且 connectedAt 为空，
+      // 会被上层误判为握手失败并触发"刷新Token+自动重连"，与批量重连逻辑抢占连接锁。
+      // 这里仍上报状态，但附带 intentional 标记，由上层决定是否跳过自动重连。
+      if (this.onDisconnect) {
+        this.onDisconnect(evt, { intentional: this.intentionalClose });
       }
     };
 
@@ -860,6 +874,8 @@ export class XyzwWebSocketClient {
 
   /** 断开连接 */
   disconnect() {
+    // 标记为主动关闭：onclose 上报时会带 intentional 标记，上层据此跳过"刷新Token+自动重连"
+    this.intentionalClose = true;
     if (this.socket) {
       this.socket.close();
       this.socket = null;
@@ -1258,9 +1274,13 @@ export class XyzwWebSocketClient {
       bosstower_gethelprankresp: "bosstower_gethelprank",
       // 功法相关响应映射
       legacy_getinforesp: "legacy_getinfo",
+      legacy_beginhangupresp: "legacy_beginhangup",
       legacy_claimhangupresp: "legacy_claimhangup",
       legacy_sendgiftresp: "legacy_sendgift",
       legacy_getgiftsresp: "legacy_getgifts",
+      // 比赛房间（预约）响应映射
+      pkroom_getfightroominforesp: "pkroom_getfightroominfo",
+      pkroom_getfightroomdetailresp: "pkroom_getfightroomdetail",
       // 盐杯竞猜响应映射
       saltcup26_getbetinforesp: "saltcup26_getbetinfo",
       saltcup26_placebetresp: "saltcup26_placebet",
@@ -1283,6 +1303,7 @@ export class XyzwWebSocketClient {
         "hero_gointobattle",
         "hero_gobackbattle",
         "lordweapon_changedefaultweapon",
+        "pkroom_appoint",
       ],
       syncrewardresp: [
         "activity_commonbuygoods",

@@ -615,6 +615,13 @@
                       营地挑战({{ campChallengeModeLabel }})
                     </n-button>
                   </n-popselect>
+                  <n-button
+                    size="small"
+                    @click="batchPkRoomAppoint"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    比赛预约
+                  </n-button>
                 </n-space>
 
                 <!-- 竞猜与十殿 -->
@@ -1329,7 +1336,26 @@
                   <tbody>
                     <tr v-for="(row, rowIndex) in log.table.rows" :key="rowIndex">
                       <td v-for="(cell, cellIndex) in row" :key="cellIndex">
-                        <span v-if="cell && typeof cell === 'object'" class="log-table-cell">
+                        <span
+                          v-if="cell && typeof cell === 'object' && cell.parts"
+                          class="log-table-cell log-table-cell-parts"
+                        >
+                          <span
+                            v-for="(part, partIndex) in cell.parts"
+                            :key="partIndex"
+                            class="log-table-part"
+                            :title="part.title || part.text || ''"
+                          >
+                            <img
+                              v-if="part.icon"
+                              :src="part.icon"
+                              class="log-table-icon"
+                              :alt="part.text || ''"
+                            />
+                            <span>{{ part.text }}</span>
+                          </span>
+                        </span>
+                        <span v-else-if="cell && typeof cell === 'object'" class="log-table-cell">
                           <img
                             v-if="cell.icon"
                             :src="cell.icon"
@@ -3735,6 +3761,7 @@ import {
   createTasksShidian,
   createTasksCampChallenge,
   createTasksXuanwuBlessing,
+  createTasksPkRoom,
 } from "@/utils/batch";
 import {
   blackMarketItemCatalog,
@@ -4380,7 +4407,7 @@ const fetchConsumptionInfo = async () => {
 };
 
 // =====================
-// 金鱼资源：金砖 / 金鱼竿 / 招募令 / 宝箱积分
+// 金鱼资源：金鱼竿 / 招募令 / 宝箱积分(格内展示各宝箱数量 + 总积分) / 金砖
 // =====================
 const fishResourceLoading = ref(false);
 
@@ -4390,10 +4417,10 @@ const resourceIcon = (path) =>
 
 // 宝箱积分折算权重：木质 1 / 青铜 10 / 黄金 20 / 铂金 50
 const BOX_POINT_WEIGHTS = [
-  [2001, 1],
-  [2002, 10],
-  [2003, 20],
-  [2004, 50],
+  [2001, 1, "木质宝箱", "/box/mzbx.png"],
+  [2002, 10, "青铜宝箱", "/box/qtbx.png"],
+  [2003, 20, "黄金宝箱", "/box/hjbx.png"],
+  [2004, 50, "铂金宝箱", "/box/bjbx.png"],
 ];
 
 // 数值按「万」显示，保留 2 位小数（如 123456 → 12.35w）
@@ -4425,60 +4452,82 @@ const fetchFishResource = async () => {
     message: `=== 开始查询金鱼资源(${targetIds.length}个账号) ===`,
     type: "info",
   });
-  const rows = [];
+  const rows = new Array(targetIds.length);
   try {
-    for (const tokenId of targetIds) {
-      if (shouldStop.value) break;
-      const token = tokens.value.find((t) => t.id === tokenId);
-      const name = token ? token.name : tokenId;
-      try {
-        await ensureConnection(tokenId);
-        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const role = roleInfo?.role || {};
-        const items = role.items || {};
+    // 并发查询（连接槽位由 ensureConnection 内部按 maxActive 限流）
+    await Promise.all(
+      targetIds.map(async (tokenId, index) => {
+        if (shouldStop.value) return;
+        const token = tokens.value.find((t) => t.id === tokenId);
+        const name = token ? token.name : tokenId;
+        try {
+          await ensureConnection(tokenId);
+          const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const role = roleInfo?.role || {};
+          const items = role.items || {};
 
-        const diamond = Number(role.diamond ?? 0) || 0;
-        const goldRod = pickItemQuantity(items, 1012);
-        const recruitOrder = pickItemQuantity(items, 1001);
-        const boxPoints = BOX_POINT_WEIGHTS.reduce(
-          (sum, [id, weight]) => sum + pickItemQuantity(items, id) * weight,
-          0,
-        );
+          const diamond = Number(role.diamond ?? 0) || 0;
+          const goldRod = pickItemQuantity(items, 1012);
+          const recruitOrder = pickItemQuantity(items, 1001);
+          const boxCounts = BOX_POINT_WEIGHTS.map(([id]) =>
+            pickItemQuantity(items, id),
+          );
+          const boxPoints = BOX_POINT_WEIGHTS.reduce(
+            (sum, [, weight], i) => sum + boxCounts[i] * weight,
+            0,
+          );
 
-        rows.push([
-          name,
-          formatWan2(diamond),
-          `${goldRod}`,
-          `${recruitOrder}`,
-          formatWan2(boxPoints),
-        ]);
-      } catch (e) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${name} 查询金鱼资源失败: ${e?.message || e}`,
-          type: "error",
-        });
-      } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-      }
-    }
+          rows[index] = [
+            name,
+            `${goldRod}`,
+            `${recruitOrder}`,
+            // 宝箱积分格内并排展示各类宝箱数量 + 总积分(可换行)
+            {
+              parts: [
+                ...BOX_POINT_WEIGHTS.map(([, , text, icon], i) => ({
+                  icon: resourceIcon(icon),
+                  text: `${boxCounts[i]}`,
+                  title: text,
+                })),
+                {
+                  // zsbx.png 本身就是宝箱造型，和前面4种箱子图标视觉上分不清，
+                  // 总积分改用文字前缀区分
+                  text: `总积分 ${formatWan2(boxPoints)}`,
+                  title: "宝箱积分",
+                },
+              ],
+            },
+            formatWan2(diamond),
+          ];
+        } catch (e) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 查询金鱼资源失败: ${e?.message || e}`,
+            type: "error",
+          });
+        } finally {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+        }
+      }),
+    );
   } finally {
     fishResourceLoading.value = false;
-    if (rows.length > 0) {
+    const finalRows = rows.filter((row) => Array.isArray(row));
+    if (finalRows.length > 0) {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `【金鱼资源】${rows.length} 个账号`,
+        message: `【金鱼资源】${finalRows.length} 个账号`,
         table: {
-          header: "金鱼资源（金砖 / 金鱼竿 / 招募令 / 宝箱积分）",
+          header: "金鱼资源（金鱼竿 / 招募令 / 宝箱积分[各宝箱数量·总积分] / 金砖）",
           columns: [
             "账号",
-            { text: "金砖", icon: resourceIcon("/icons/jinzhuan.svg") },
             { text: "金鱼竿", icon: resourceIcon("/fish/hjyg.png") },
             { text: "招募令", icon: resourceIcon("/icons/zml.png") },
             { text: "宝箱积分", icon: resourceIcon("/box/zsbx.png") },
+            { text: "金砖", icon: resourceIcon("/icons/jinzhuan.svg") },
           ],
-          rows,
+          rows: finalRows,
         },
         type: "info",
       });
@@ -4688,56 +4737,60 @@ const fetchFishProgress = async () => {
     message: `=== 开始查询拿鱼进度(${targetIds.length}个账号) ===`,
     type: "info",
   });
-  const rows = [];
+  const rows = new Array(targetIds.length);
   try {
-    for (const tokenId of targetIds) {
-      if (shouldStop.value) break;
-      const token = tokens.value.find((t) => t.id === tokenId);
-      const name = token ? token.name : tokenId;
-      try {
-        await ensureConnection(tokenId);
-        const result = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "activity_get",
-          {},
-          10000,
-        );
-        const activity = pickBountyActivity(result);
-        const tasks = activity?.task;
-        if (!tasks) {
+    // 并发查询（连接槽位由 ensureConnection 内部按 maxActive 限流）
+    await Promise.all(
+      targetIds.map(async (tokenId, index) => {
+        if (shouldStop.value) return;
+        const token = tokens.value.find((t) => t.id === tokenId);
+        const name = token ? token.name : tokenId;
+        try {
+          await ensureConnection(tokenId);
+          const result = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_get",
+            {},
+            10000,
+          );
+          const activity = pickBountyActivity(result);
+          const tasks = activity?.task;
+          if (!tasks) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${name} 未获取到悬赏活动数据（活动可能未开启）: ${describeActivityShape(result)}`,
+              type: "warning",
+            });
+            return;
+          }
+
+          let tierDone = 0;
+          const cells = BOUNTY_TASKS.map((task) => {
+            const current = Number(readNumberKey(tasks, task.id)) || 0;
+            const { done, next } = calcBountyProgress(task.tiers, current);
+            tierDone += done;
+            return next === undefined ? `${current}/已满` : `${current}/${next}`;
+          });
+          rows[index] = [name, ...cells, `${tierDone}/${BOUNTY_TIER_TOTAL}`];
+        } catch (e) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${name} 未获取到悬赏活动数据（活动可能未开启）: ${describeActivityShape(result)}`,
-            type: "warning",
+            message: `${name} 查询拿鱼进度失败: ${e?.message || e}`,
+            type: "error",
           });
-          continue;
+        } finally {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
         }
-
-        let tierDone = 0;
-        const cells = BOUNTY_TASKS.map((task) => {
-          const current = Number(readNumberKey(tasks, task.id)) || 0;
-          const { done, next } = calcBountyProgress(task.tiers, current);
-          tierDone += done;
-          return next === undefined ? `${current}/已满` : `${current}/${next}`;
-        });
-        rows.push([name, ...cells, `${tierDone}/${BOUNTY_TIER_TOTAL}`]);
-      } catch (e) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${name} 查询拿鱼进度失败: ${e?.message || e}`,
-          type: "error",
-        });
-      } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-      }
-    }
+      }),
+    );
   } finally {
     fishProgressLoading.value = false;
-    if (rows.length > 0) {
+    const finalRows = rows.filter((row) => Array.isArray(row));
+    if (finalRows.length > 0) {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `【拿鱼进度】${rows.length} 个账号`,
+        message: `【拿鱼进度】${finalRows.length} 个账号`,
         table: {
           header: "拿鱼进度（悬赏：当前/下一档）",
           columns: [
@@ -4745,7 +4798,7 @@ const fetchFishProgress = async () => {
             ...BOUNTY_TASKS.map((task) => task.name),
             "已完成档位",
           ],
-          rows,
+          rows: finalRows,
         },
         type: "info",
       });
@@ -4989,54 +5042,58 @@ const queryAutumnVotes = async () => {
     message: `=== 开始查询中秋揽月已投(${targetIds.length}个账号) ===`,
     type: "info",
   });
-  const rows = [];
+  const rows = new Array(targetIds.length);
   try {
-    for (const tokenId of targetIds) {
-      if (shouldStop.value) break;
-      const token = tokens.value.find((t) => t.id === tokenId);
-      const name = token ? token.name : tokenId;
-      try {
-        await ensureConnection(tokenId);
-        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const role = roleInfo?.role || {};
-        const remain = pickItemQuantity(role.items, AUTUMN_ITEM_ID);
-        const roleId = role.roleId ? String(role.roleId) : null;
+    // 并发查询（连接槽位由 ensureConnection 内部按 maxActive 限流）
+    await Promise.all(
+      targetIds.map(async (tokenId, index) => {
+        if (shouldStop.value) return;
+        const token = tokens.value.find((t) => t.id === tokenId);
+        const name = token ? token.name : tokenId;
+        try {
+          await ensureConnection(tokenId);
+          const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const role = roleInfo?.role || {};
+          const remain = pickItemQuantity(role.items, AUTUMN_ITEM_ID);
+          const roleId = role.roleId ? String(role.roleId) : null;
 
-        let voted = "—";
-        if (roleId) {
-          const rankResp = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "autumn_getrolerank",
-            {},
-            10000,
-          );
-          const entry = pickAutumnRankEntry(rankResp, roleId);
-          if (entry) {
-            voted = `${Number(entry.distance ?? entry.score ?? 0)}`;
+          let voted = "—";
+          if (roleId) {
+            const rankResp = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "autumn_getrolerank",
+              {},
+              10000,
+            );
+            const entry = pickAutumnRankEntry(rankResp, roleId);
+            if (entry) {
+              voted = `${Number(entry.distance ?? entry.score ?? 0)}`;
+            }
           }
+          rows[index] = [name, `${remain}`, voted];
+        } catch (e) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 查询中秋揽月失败: ${e?.message || e}`,
+            type: "error",
+          });
+        } finally {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
         }
-        rows.push([name, `${remain}`, voted]);
-      } catch (e) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${name} 查询中秋揽月失败: ${e?.message || e}`,
-          type: "error",
-        });
-      } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-      }
-    }
+      }),
+    );
   } finally {
     autumnQueryLoading.value = false;
-    if (rows.length > 0) {
+    const finalRows = rows.filter((row) => Array.isArray(row));
+    if (finalRows.length > 0) {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `【中秋揽月】${rows.length} 个账号（已投取自服务端排行榜 distance，不在榜则显示 —）`,
+        message: `【中秋揽月】${finalRows.length} 个账号（已投取自服务端排行榜 distance，不在榜则显示 —）`,
         table: {
           header: "中秋揽月已投查询",
           columns: ["账号", "剩余蜜饯", "已投"],
-          rows,
+          rows: finalRows,
         },
         type: "info",
       });
@@ -5726,6 +5783,7 @@ const taskGroupDefinitions = [
       "batchXuanwuBlessing",
       "batchXuanwuLottery",
       "batchXuanwuSingleLottery",
+      "batchPkRoomAppoint",
     ],
   },
   {
@@ -8092,13 +8150,21 @@ const copyLogs = () => {
     message.warning("没有可复制的日志");
     return;
   }
+  // 表格表头/单元格可能是 {icon,text} 或 {parts:[...]} 对象，复制时只取文本
+  const cellToText = (cell) => {
+    if (!cell || typeof cell !== "object") return `${cell ?? ""}`;
+    if (cell.parts) return cell.parts.map((part) => part.text).join("/");
+    return `${cell.text ?? ""}`;
+  };
   const logText = logs.value
     .map((log) => {
       let text = `${log.time} ${log.message}`;
       if (log.table) {
         text += `\n${log.table.header}`;
-        text += `\n${log.table.columns.join("\t")}`;
-        text += `\n${log.table.rows.map((row) => row.join("\t")).join("\n")}`;
+        text += `\n${log.table.columns.map(cellToText).join("\t")}`;
+        text += `\n${log.table.rows
+          .map((row) => row.map(cellToText).join("\t"))
+          .join("\n")}`;
       }
       return text;
     })
@@ -8221,11 +8287,21 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       type: "info",
     });
 
-    tokenStore.createWebSocketConnection(
+    // 必须 await 并检查返回值：返回 null 表示本次根本没发起连接
+    // (未拿到连接锁 / 其他标签页已有连接)，否则会被误判为"连接超时"
+    const createdClient = await tokenStore.createWebSocketConnection(
       tokenId,
       connectToken.token,
       connectToken.wsUrl,
     );
+    if (!createdClient) {
+      const info = tokenStore.getConnectionInfo?.(tokenId);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `连接未创建: ${formatConnectionFailure(tokenId, info)}`,
+        type: "warning",
+      });
+    }
     connected = await waitForConnection(tokenId);
 
     if (!connected && maxRetries > 0) {
@@ -8279,11 +8355,19 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       });
 
       const refreshedToken = currentToken || tokens.value.find((t) => t.id === tokenId);
-      tokenStore.createWebSocketConnection(
+      const recreatedClient = await tokenStore.createWebSocketConnection(
         tokenId,
         refreshedToken.token,
         refreshedToken.wsUrl,
       );
+      if (!recreatedClient) {
+        const info = tokenStore.getConnectionInfo?.(tokenId);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `重连未创建: ${formatConnectionFailure(tokenId, info)}`,
+          type: "warning",
+        });
+      }
 
       connected = await waitForConnection(tokenId);
     }
@@ -8928,6 +9012,9 @@ const { batchCampChallenge, batchCampChallengePet, batchCampClaimTasks } = tasks
 const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
 const { batchXuanwuBlessing, batchXuanwuLottery, batchXuanwuSingleLottery } =
   tasksXuanwuBlessing;
+
+const tasksPkRoom = createTasksPkRoom(createTaskDeps());
+const { batchPkRoomAppoint } = tasksPkRoom;
 
 // 营地挑战模式选择
 const campChallengeMode = ref("pet");
@@ -9621,6 +9708,18 @@ const stopBatch = () => {
 
 /* 表格单元格内的图标 + 文字（金鱼资源等） */
 .log-table-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 单元格内多组「图标 + 数字」(如一格展示各类宝箱数量)，允许换行 */
+.log-table-cell-parts {
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.log-table-part {
   display: inline-flex;
   align-items: center;
   gap: 3px;
