@@ -222,6 +222,21 @@
                 </n-button>
                 <n-button
                   size="small"
+                  type="warning"
+                  ghost
+                  :loading="fishProgressLoading"
+                  :disabled="fishProgressLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchFishProgress"
+                >
+                  拿鱼进度
+                  <template #icon v-if="fishProgressLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
                   type="info"
                   ghost
                   :loading="apexScheduleInfoLoading"
@@ -1114,6 +1129,57 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键购买俱乐部5皮肤币
+                </n-button>
+                <n-button
+                  size="small"
+                  :loading="fishClaimLoading"
+                  :disabled="fishClaimLoading || isRunning || selectedTokens.length === 0"
+                  @click="claimFishRewards"
+                >
+                  一键领金鱼道具
+                  <template #icon v-if="fishClaimLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+              </n-space>
+              <n-space align="center" style="margin-top: 12px;">
+                <span class="batch-inline-label">中秋揽月</span>
+                <n-input-number
+                  v-model:value="autumnVoteCount"
+                  size="small"
+                  :min="1"
+                  :max="9999"
+                  :step="1"
+                  class="batch-count-input"
+                />
+                <span class="batch-inline-label">蜜饯</span>
+                <n-button
+                  size="small"
+                  :loading="autumnVoteLoading"
+                  :disabled="autumnVoteLoading || isRunning || selectedTokens.length === 0"
+                  @click="autumnVote"
+                >
+                  投票
+                  <template #icon v-if="autumnVoteLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
+                  :loading="autumnQueryLoading"
+                  :disabled="autumnQueryLoading || isRunning || selectedTokens.length === 0"
+                  @click="queryAutumnVotes"
+                >
+                  查询已投
+                  <template #icon v-if="autumnQueryLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -4420,6 +4486,685 @@ const fetchFishResource = async () => {
     addLog({
       time: new Date().toLocaleTimeString(),
       message: `=== 金鱼资源查询完成 ===`,
+      type: "info",
+    });
+  }
+};
+
+// =====================
+// 拿鱼进度：悬赏活动 5 项累计任务（招募/宝箱/捕获/盐罐/金砖）
+// 数据来源 activity_get 的 commonActivityInfo[活动ID].task（键为 MissionType：1招募 2宝箱 3捕获 4盐罐 5金砖）
+// =====================
+const fishProgressLoading = ref(false);
+
+// 各任务档位阈值（与游戏内任务配置一致，20 档/项）
+const BOUNTY_TASKS = [
+  {
+    id: 1,
+    name: "招募",
+    tiers: [80, 160, 240, 320, 400, 560, 720, 880, 1040, 1200, 1440, 1680, 1920, 2160, 2400, 2720, 3040, 3360, 3680, 4000],
+  },
+  {
+    id: 2,
+    name: "宝箱",
+    tiers: [2000, 4000, 6000, 8000, 10000, 14000, 18000, 22000, 26000, 30000, 36000, 42000, 48000, 54000, 60000, 68000, 76000, 84000, 92000, 100000],
+  },
+  {
+    id: 3,
+    name: "捕获",
+    tiers: [25, 50, 75, 125, 175, 225, 300, 375, 450, 525, 625, 725, 825, 925, 1050, 1175, 1300, 1450, 1600, 1750],
+  },
+  {
+    id: 4,
+    name: "盐罐",
+    tiers: [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60],
+  },
+  {
+    id: 5,
+    name: "金砖",
+    tiers: [10000, 20000, 30000, 40000, 50000, 70000, 90000, 110000, 130000, 150000, 180000, 210000, 240000, 270000, 300000, 340000, 380000, 420000, 460000, 500000],
+  },
+];
+const BOUNTY_TIER_TOTAL = BOUNTY_TASKS.reduce(
+  (sum, task) => sum + task.tiers.length,
+  0,
+);
+
+// 物品字典（与 ClubCarKing.vue / CarTaskCard.vue 的 itemMapping 保持一致，未收录的回退显示原始 itemId）
+const ITEM_NAMES = {
+  1001: "招募令",
+  1003: "进阶石",
+  1006: "精铁",
+  1007: "竞技场门票",
+  1008: "木柴火把",
+  1009: "青铜火把",
+  1010: "咸神火把",
+  1011: "普通鱼竿",
+  1012: "黄金鱼竿",
+  1013: "珍珠",
+  1014: "军团币",
+  1016: "晶石",
+  1017: "复活丹",
+  1019: "盐靛",
+  1020: "皮肤币",
+  1021: "扫荡魔毯",
+  1022: "白玉",
+  1023: "彩玉",
+  1026: "扳手",
+  1033: "贝壳",
+  1035: "金盐靛",
+  10002: "蓝玉",
+  10003: "红玉",
+  10101: "四圣碎片",
+  2001: "木制宝箱",
+  2002: "青铜宝箱",
+  2003: "黄金宝箱",
+  2004: "铂金宝箱",
+  2005: "钻石宝箱",
+  2101: "助威币",
+  3001: "金币袋子",
+  3002: "金砖袋子",
+  3005: "紫色随机碎片",
+  3006: "橙色随机碎片",
+  3007: "红色随机碎片",
+  3008: "精铁袋子",
+  3009: "进阶袋子",
+  3010: "梦魇袋子",
+  3011: "白玉袋子",
+  3012: "扳手袋子",
+  3020: "聚宝盆",
+  3021: "豪华聚宝盆",
+  3201: "红色万能碎片",
+  3302: "橙色万能碎片",
+  35002: "刷新券",
+  35009: "零件",
+  5286: "蜜饯",
+  5287: "玉盏",
+};
+
+// 从 Map 或普通对象中按数字键取值
+const readNumberKey = (container, key) => {
+  if (!container) return undefined;
+  if (typeof container.get === "function") {
+    const byNumber = container.get(key);
+    return byNumber !== undefined ? byNumber : container.get(String(key));
+  }
+  return container[key] !== undefined ? container[key] : container[String(key)];
+};
+
+// 读取 Map / 普通对象的键列表
+const readKeyList = (container) => {
+  if (!container) return [];
+  if (typeof container.get === "function") return Array.from(container.keys());
+  return Object.keys(container);
+};
+
+// 深度查找 commonActivityInfo（活动数据可能挂在 activity / body 等不同层级）
+const findCommonActivityInfo = (node, depth = 0) => {
+  if (!node || typeof node !== "object" || depth > 4) return null;
+  if (node.commonActivityInfo) return node.commonActivityInfo;
+  for (const value of Object.values(node)) {
+    if (value && typeof value === "object") {
+      const found = findCommonActivityInfo(value, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+const readActivityEntries = (common) =>
+  typeof common?.get === "function"
+    ? Array.from(common.entries())
+    : Object.entries(common || {});
+
+// 定位悬赏活动（task 的键即 MissionType：1招募 2宝箱 3捕获 4盐罐 5金砖）。
+// 服务端可能省略进度为 0 / 未变化的任务键（实测有账号只返回 2~5），
+// 所以只要命中任意一个已知任务键即视为候选，按命中数打分取最优，
+// 再兜底用 record 的 missionId 范围（1~100）识别。
+const pickBountyActivity = (result) => {
+  const common = findCommonActivityInfo(result);
+  if (!common) return null;
+  let best = null;
+  for (const [rawId, item] of readActivityEntries(common)) {
+    const knownCount = readKeyList(item?.task)
+      .map((key) => Number(key))
+      .filter((key) => BOUNTY_TASKS.some((task) => task.id === key)).length;
+    const recordKeys = readKeyList(item?.record).map((key) => Number(key));
+    const recordInBountyRange =
+      recordKeys.length > 0 && recordKeys.every((key) => key >= 1 && key <= 100);
+    if (knownCount === 0 && !recordInBountyRange) continue;
+    const score = knownCount * 2 + (recordInBountyRange ? 1 : 0);
+    if (!best || score > best.score) best = { score, rawId, item };
+  }
+  if (!best) return null;
+  return {
+    activityId: Number.isNaN(Number(best.rawId))
+      ? best.rawId
+      : Number(best.rawId),
+    task: best.item?.task,
+    record: best.item?.record,
+  };
+};
+
+// 定位失败时输出实际结构，便于排查（活动ID / 任务键 / 已领记录数）
+const describeActivityShape = (result) => {
+  const common = findCommonActivityInfo(result);
+  if (!common) {
+    return `未找到 commonActivityInfo（顶层键: ${Object.keys(result || {}).join(",") || "无"}）`;
+  }
+  const entries = readActivityEntries(common);
+  const detail = entries
+    .map(([id, item]) => {
+      const taskKeys = readKeyList(item?.task).join("/") || "-";
+      const recordCount = readKeyList(item?.record).length;
+      return `${id}(task:${taskKeys} record:${recordCount})`;
+    })
+    .join("；");
+  return `共${entries.length}个活动: ${detail}`;
+};
+
+// 单项进度：已完成档数 + 下一档目标
+const calcBountyProgress = (tiers, current) => {
+  let done = 0;
+  for (const tier of tiers) {
+    if (current >= tier) done++;
+    else break;
+  }
+  const next = tiers.find((tier) => tier > current);
+  return { done, next };
+};
+
+// 查询选中账号的拿鱼（悬赏）进度并以表格写入日志
+const fetchFishProgress = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0 ? [...selectedTokens.value] : [];
+  if (targetIds.length === 0) {
+    message.warning("没有可查询的账号");
+    return;
+  }
+  fishProgressLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询拿鱼进度(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+  const rows = [];
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          10000,
+        );
+        const activity = pickBountyActivity(result);
+        const tasks = activity?.task;
+        if (!tasks) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 未获取到悬赏活动数据（活动可能未开启）: ${describeActivityShape(result)}`,
+            type: "warning",
+          });
+          continue;
+        }
+
+        let tierDone = 0;
+        const cells = BOUNTY_TASKS.map((task) => {
+          const current = Number(readNumberKey(tasks, task.id)) || 0;
+          const { done, next } = calcBountyProgress(task.tiers, current);
+          tierDone += done;
+          return next === undefined ? `${current}/已满` : `${current}/${next}`;
+        });
+        rows.push([name, ...cells, `${tierDone}/${BOUNTY_TIER_TOTAL}`]);
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 查询拿鱼进度失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    fishProgressLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【拿鱼进度】${rows.length} 个账号`,
+        table: {
+          header: "拿鱼进度（悬赏：当前/下一档）",
+          columns: [
+            "账号",
+            ...BOUNTY_TASKS.map((task) => task.name),
+            "已完成档位",
+          ],
+          rows,
+        },
+        type: "info",
+      });
+    }
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 拿鱼进度查询完成 ===`,
+      type: "info",
+    });
+  }
+};
+
+// =====================
+// 一键领金鱼道具：领取悬赏已达成但未领取的档位奖励
+// 命令 activity_claimtaskreward {activityId, missionId}
+// missionId = (任务类型-1)*20 + 档位序号
+// =====================
+const fishClaimLoading = ref(false);
+
+// 汇总已达成且未领取的档位（record 为已领取的 missionId 记录）
+const collectClaimableMissionIds = (task, record) => {
+  const claimed = new Set(readKeyList(record).map((key) => Number(key)));
+  const ids = [];
+  let reached = 0;
+  BOUNTY_TASKS.forEach((taskCfg, typeIndex) => {
+    const current = Number(readNumberKey(task, taskCfg.id)) || 0;
+    taskCfg.tiers.forEach((tier, starIndex) => {
+      if (current < tier) return;
+      reached++;
+      const missionId = typeIndex * 20 + (starIndex + 1);
+      if (!claimed.has(missionId)) ids.push(missionId);
+    });
+  });
+  return { ids, reached };
+};
+
+// 汇总响应里的奖励道具
+const sumRewardItems = (resp) => {
+  const gained = new Map();
+  const list = resp?.reward || resp?.body?.reward || [];
+  for (const item of list) {
+    const itemId = item?.itemId;
+    if (!itemId) continue;
+    const value = Number(item?.value) || 0;
+    gained.set(itemId, (gained.get(itemId) || 0) + value);
+  }
+  return gained;
+};
+
+// 批量领取选中账号的金鱼道具（悬赏档位奖励）
+const claimFishRewards = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0 ? [...selectedTokens.value] : [];
+  if (targetIds.length === 0) {
+    message.warning("没有可操作的账号");
+    return;
+  }
+  fishClaimLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始一键领取金鱼道具(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+  const rows = [];
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          10000,
+        );
+        const activity = pickBountyActivity(result);
+        if (!activity) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 未获取到悬赏活动数据（活动可能未开启）: ${describeActivityShape(result)}`,
+            type: "warning",
+          });
+          continue;
+        }
+
+        const { ids, reached } = collectClaimableMissionIds(
+          activity.task,
+          activity.record,
+        );
+        if (ids.length === 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 无待领取档位（已达成 ${reached} 档，均已领取）`,
+            type: "info",
+          });
+          continue;
+        }
+
+        const gained = new Map();
+        let claimed = 0;
+        for (const missionId of ids) {
+          if (shouldStop.value) break;
+          try {
+            const resp = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_claimtaskreward",
+              { activityId: activity.activityId, missionId },
+              8000,
+            );
+            for (const [itemId, value] of sumRewardItems(resp)) {
+              gained.set(itemId, (gained.get(itemId) || 0) + value);
+            }
+            claimed++;
+          } catch (e) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${name} 领取档位 ${missionId} 失败: ${e?.message || e}`,
+              type: "error",
+            });
+          }
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+
+        const gainedText =
+          gained.size === 0
+            ? "—"
+            : Array.from(gained.entries())
+                .map(
+                  ([itemId, value]) =>
+                    `${ITEM_NAMES[itemId] || itemId}×${value}`,
+                )
+                .join("、");
+        rows.push([name, `${reached}`, `${claimed}/${ids.length}`, gainedText]);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 金鱼道具领取完成: ${claimed}/${ids.length} 档`,
+          type: claimed > 0 ? "success" : "warning",
+        });
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 一键领取金鱼道具失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    fishClaimLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【一键领金鱼道具】${rows.length} 个账号`,
+        table: {
+          header: "一键领金鱼道具（悬赏档位奖励）",
+          columns: ["账号", "已达成档位", "本次领取", "获得道具"],
+          rows,
+        },
+        type: "info",
+      });
+    }
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 金鱼道具领取结束 ===`,
+      type: "info",
+    });
+  }
+};
+
+// =====================
+// 中秋揽月：消耗蜜饯（itemId 5286）投票
+// 命令 autumn_useitem {itemNum}，响应的 roleAutumn.distance 为投后距离
+// =====================
+const AUTUMN_ITEM_ID = 5286;
+const AUTUMN_VOTE_LOG_KEY = "autumn_vote_log_v1";
+const autumnVoteCount = ref(1);
+const autumnVoteLoading = ref(false);
+
+// 按天记录本工具投出的蜜饯数：{ "2026-09-25": { [tokenId]: 3 } }
+const autumnVoteLog = ref({});
+try {
+  autumnVoteLog.value =
+    JSON.parse(localStorage.getItem(AUTUMN_VOTE_LOG_KEY) || "{}") || {};
+} catch {
+  autumnVoteLog.value = {};
+}
+
+const autumnTodayKey = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const autumnTodayVotes = (tokenId) =>
+  Number(autumnVoteLog.value?.[autumnTodayKey()]?.[tokenId] || 0);
+
+const addAutumnTodayVotes = (tokenId, count) => {
+  const day = autumnTodayKey();
+  const dayLog = { ...(autumnVoteLog.value?.[day] || {}) };
+  dayLog[tokenId] = Number(dayLog[tokenId] || 0) + count;
+  autumnVoteLog.value = { ...autumnVoteLog.value, [day]: dayLog };
+  try {
+    localStorage.setItem(
+      AUTUMN_VOTE_LOG_KEY,
+      JSON.stringify(autumnVoteLog.value),
+    );
+  } catch {}
+};
+
+const autumnQueryLoading = ref(false);
+
+// 排行榜里找本人记录（distance/score 即已投蜜饯数）
+const pickAutumnRankEntry = (resp, roleId) => {
+  const list = resp?.list || resp?.roleList || resp?.rankList || [];
+  if (!Array.isArray(list)) return null;
+  const rid = String(roleId);
+  return (
+    list.find(
+      (item) =>
+        String(item?.roleId ?? item?.roleID ?? "") === rid ||
+        String(item?.id ?? "") === rid,
+    ) || null
+  );
+};
+
+// 查询已选账号的：剩余蜜饯（服务端道具 5286）+ 已投蜜饯（服务端排行榜 distance）
+const queryAutumnVotes = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0 ? [...selectedTokens.value] : [];
+  if (targetIds.length === 0) {
+    message.warning("没有可查询的账号");
+    return;
+  }
+  autumnQueryLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询中秋揽月已投(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+  const rows = [];
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const role = roleInfo?.role || {};
+        const remain = pickItemQuantity(role.items, AUTUMN_ITEM_ID);
+        const roleId = role.roleId ? String(role.roleId) : null;
+
+        let voted = "—";
+        if (roleId) {
+          const rankResp = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "autumn_getrolerank",
+            {},
+            10000,
+          );
+          const entry = pickAutumnRankEntry(rankResp, roleId);
+          if (entry) {
+            voted = `${Number(entry.distance ?? entry.score ?? 0)}`;
+          }
+        }
+        rows.push([name, `${remain}`, voted]);
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 查询中秋揽月失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    autumnQueryLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【中秋揽月】${rows.length} 个账号（已投取自服务端排行榜 distance，不在榜则显示 —）`,
+        table: {
+          header: "中秋揽月已投查询",
+          columns: ["账号", "剩余蜜饯", "已投"],
+          rows,
+        },
+        type: "info",
+      });
+    }
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 中秋揽月查询完成 ===`,
+      type: "info",
+    });
+  }
+};
+
+const autumnVote = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0 ? [...selectedTokens.value] : [];
+  const itemNum = Math.floor(Number(autumnVoteCount.value) || 0);
+  if (targetIds.length === 0) {
+    message.warning("没有可操作的账号");
+    return;
+  }
+  if (itemNum <= 0) {
+    message.warning("请输入蜜饯数量");
+    return;
+  }
+  autumnVoteLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始中秋揽月投票(${targetIds.length}个账号, 每个 ${itemNum} 个蜜饯) ===`,
+    type: "info",
+  });
+  const rows = [];
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const owned = Number(
+          roleInfo?.role?.items?.[AUTUMN_ITEM_ID]?.quantity || 0,
+        );
+        if (owned < itemNum) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 蜜饯不足(现有 ${owned}, 需要 ${itemNum})，已跳过`,
+            type: "warning",
+          });
+          rows.push([
+            name,
+            `${autumnTodayVotes(tokenId)}`,
+            "0",
+            "—",
+            `${owned}`,
+            "蜜饯不足",
+          ]);
+          continue;
+        }
+
+        const resp = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "autumn_useitem",
+          { itemNum },
+          8000,
+        );
+        const roleAutumn = resp?.roleAutumn || resp?.body?.roleAutumn || {};
+        const distance = Number(roleAutumn.distance) || 0;
+        const remain = Number(
+          resp?.role?.items?.[AUTUMN_ITEM_ID]?.quantity ?? owned - itemNum,
+        );
+        const gained = sumRewardItems(resp);
+        const gainedText =
+          gained.size === 0
+            ? "—"
+            : Array.from(gained.entries())
+                .map(
+                  ([itemId, value]) => `${ITEM_NAMES[itemId] || itemId}×${value}`,
+                )
+                .join("、");
+        addAutumnTodayVotes(tokenId, itemNum);
+        rows.push([
+          name,
+          `${autumnTodayVotes(tokenId)}`,
+          `${itemNum}`,
+          `${distance}`,
+          `${remain}`,
+          gainedText,
+        ]);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 投票成功: 蜜饯 ${itemNum} 个，今日已投 ${autumnTodayVotes(tokenId)}，当前距离 ${distance}，剩余蜜饯 ${remain}（服务端 itemNum=${roleAutumn.itemNum ?? "-"}, lastUseItemNum=${roleAutumn.lastUseItemNum ?? "-"}）`,
+          type: "success",
+        });
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 中秋揽月投票失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    autumnVoteLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【中秋揽月】${rows.length} 个账号`,
+        table: {
+          header: "中秋揽月投票（消耗蜜饯）",
+          columns: [
+            "账号",
+            "今日已投(本工具)",
+            "本次投票",
+            "当前距离",
+            "剩余蜜饯",
+            "获得道具",
+          ],
+          rows,
+        },
+        type: "info",
+      });
+    }
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 中秋揽月投票结束 ===`,
       type: "info",
     });
   }

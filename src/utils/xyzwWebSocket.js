@@ -360,6 +360,7 @@ export function registerDefaultCommands(reg) {
     .register("activity_lottery")
     .register("activity_claimlotterycumulative")
     .register("activity_claimsignreward")
+    .register("activity_claimtaskreward")
     .register("activity_commonbuygoods")
     .register("legion_getpayloadtask")
     .register("legion_getpayloadkillrecord")
@@ -441,6 +442,10 @@ export function registerDefaultCommands(reg) {
     .register("bosstower_startboss")
     .register("bosstower_startbox")
     .register("discount_getdiscountinfo")
+
+    // 中秋揽月相关
+    .register("autumn_useitem")
+    .register("autumn_getrolerank")
 
     // 换皮闯关相关
     .register("towers_getinfo")
@@ -1211,6 +1216,9 @@ export class XyzwWebSocketClient {
       bosstower_startbossresp: "bosstower_startboss",
       bosstower_startboxresp: "bosstower_startbox",
       discount_getdiscountinforesp: "discount_getdiscountinfo",
+      // 中秋揽月响应映射
+      autumn_useitemresp: "autumn_useitem",
+      autumn_getrolerankresp: "autumn_getrolerank",
       // 升星相关响应映射
       hero_heroupgradestarresp: "hero_heroupgradestar",
       hero_heroupgradelevelresp: "hero_heroupgradelevel",
@@ -1245,7 +1253,7 @@ export class XyzwWebSocketClient {
       activity_getlotteryinforesp: "activity_getlotteryinfo",
       activity_lotteryresp: "activity_lottery",
       activity_claimlotterycumulativeresp: "activity_claimlotterycumulative",
-      activity_rewardresp: "activity_claimsignreward",
+      activity_rewardresp: ["activity_claimsignreward", "activity_claimtaskreward"],
       arena_getarearankresp: "arena_getarearank",
       bosstower_gethelprankresp: "bosstower_gethelprank",
       // 功法相关响应映射
