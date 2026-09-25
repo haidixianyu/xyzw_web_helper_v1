@@ -1,8 +1,14 @@
 import { workerSleep } from "../workerTimer.js";
+import {
+  compareBlackMarketPurchaseLists,
+  normalizeBlackMarketPurchaseList,
+  toStorePurchaseItemList,
+} from "./blackMarketConfig";
 
 /**
  * 商店类任务
- * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase, collection_claimfreereward
+ * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase,
+ * store_syncpurchaseconfig, collection_claimfreereward
  */
 
 /**
@@ -27,6 +33,100 @@ export function createTasksStore(deps) {
     currentRunningTokenId,
     delayConfig,
   } = deps;
+
+  const getBlackMarketPurchaseConfig = () =>
+    normalizeBlackMarketPurchaseList(batchSettings.blackMarketPurchaseList);
+
+  const readBlackMarketPurchaseConfig = async (tokenId) => {
+    const result = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "store_getpurchase",
+      {},
+      5000,
+    );
+
+    return {
+      purchaseCnt: Number(result?.purchaseCnt || 0),
+      purchaseItemList: normalizeBlackMarketPurchaseList(
+        result?.purchaseItemList || [],
+      ),
+    };
+  };
+
+  const updateBlackMarketPurchaseConfig = async (tokenId, tokenName) => {
+    const configuredPurchaseList = getBlackMarketPurchaseConfig();
+
+    if (configuredPurchaseList.length === 0) {
+      throw new Error("未配置黑市采购清单");
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 正在读取当前黑市采购清单...`,
+      type: "info",
+    });
+
+    const currentPurchaseConfig = await readBlackMarketPurchaseConfig(tokenId);
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 当前黑市清单: ${currentPurchaseConfig.purchaseItemList.length} 项，共 ${currentPurchaseConfig.purchaseCnt} 次`,
+      type: "info",
+    });
+
+    if (
+      compareBlackMarketPurchaseLists(
+        currentPurchaseConfig.purchaseItemList,
+        configuredPurchaseList,
+      )
+    ) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 黑市采购清单已是目标配置，跳过下发`,
+        type: "info",
+      });
+
+      return;
+    }
+
+    const purchaseCnt = Math.max(1, currentPurchaseConfig.purchaseCnt || 1);
+    const purchaseItemList = toStorePurchaseItemList(configuredPurchaseList);
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 正在下发黑市采购清单...`,
+      type: "info",
+    });
+
+    await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "store_setpurchase",
+      {
+        purchaseCnt,
+        purchaseItemList,
+      },
+      5000,
+    );
+
+    await workerSleep(delayConfig.action);
+
+    const verifiedPurchaseConfig = await readBlackMarketPurchaseConfig(tokenId);
+
+    if (
+      !compareBlackMarketPurchaseLists(
+        verifiedPurchaseConfig.purchaseItemList,
+        configuredPurchaseList,
+      )
+    ) {
+      throw new Error("黑市采购清单写回后校验失败");
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 黑市采购清单已更新 ${purchaseItemList.length} 项`,
+      type: "success",
+    });
+  };
 
   /**
    * 一键购买四圣碎片
@@ -311,6 +411,61 @@ export function createTasksStore(deps) {
   };
 
   /**
+   * 一键配置黑市采购清单
+   */
+  const store_syncpurchaseconfig = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始配置黑市采购清单: ${token.name} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+        await updateBlackMarketPurchaseConfig(tokenId, token.name);
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 配置黑市采购清单失败: ${error.message}`,
+          type: "error",
+        });
+        tokenStatus.value[tokenId] = "failed";
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭 (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
+  /**
    * 黑市一键采购
    */
   const store_purchase = async () => {
@@ -397,6 +552,8 @@ export function createTasksStore(deps) {
     legion_storebuygoods,
     legionStoreBuySkinCoins,
     store_purchase,
+    store_syncpurchaseconfig,
+    readBlackMarketPurchaseConfig,
     collection_claimfreereward,
   };
 }

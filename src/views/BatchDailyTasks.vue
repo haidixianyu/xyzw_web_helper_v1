@@ -209,6 +209,21 @@
                   size="small"
                   type="info"
                   ghost
+                  :loading="fishResourceLoading"
+                  :disabled="fishResourceLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchFishResource"
+                >
+                  金鱼资源
+                  <template #icon v-if="fishResourceLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  size="small"
+                  type="info"
+                  ghost
                   :loading="apexScheduleInfoLoading"
                   :disabled="apexScheduleInfoLoading || isRunning || selectedTokens.length === 0"
                   @click="fetchApexScheduleInfo"
@@ -886,6 +901,21 @@
                 -->
                 <n-button
                   size="small"
+                  type="primary"
+                  ghost
+                  @click="openBlackMarketPurchaseModal"
+                >
+                  黑市采购清单配置
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="store_syncpurchaseconfig"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键配置黑市清单
+                </n-button>
+                <n-button
+                  size="small"
                   @click="store_purchase"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -1212,15 +1242,37 @@
                 <table class="log-table">
                   <thead>
                     <tr>
-                      <th v-for="col in log.table.columns" :key="col">
-                        {{ col }}
+                      <th v-for="(col, colIndex) in log.table.columns" :key="colIndex">
+                        <span
+                          v-if="col && typeof col === 'object'"
+                          class="log-table-cell"
+                          :title="col.text || ''"
+                        >
+                          <img
+                            v-if="col.icon"
+                            :src="col.icon"
+                            class="log-table-icon"
+                            :alt="col.text || ''"
+                          />
+                          <span v-else>{{ col.text }}</span>
+                        </span>
+                        <template v-else>{{ col }}</template>
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="(row, rowIndex) in log.table.rows" :key="rowIndex">
                       <td v-for="(cell, cellIndex) in row" :key="cellIndex">
-                        {{ cell }}
+                        <span v-if="cell && typeof cell === 'object'" class="log-table-cell">
+                          <img
+                            v-if="cell.icon"
+                            :src="cell.icon"
+                            class="log-table-icon"
+                            :alt="cell.text || ''"
+                          />
+                          <span>{{ cell.text }}</span>
+                        </span>
+                        <template v-else>{{ cell }}</template>
                       </td>
                     </tr>
                   </tbody>
@@ -2108,6 +2160,155 @@
           <n-button type="primary" @click="saveDreamBuyConfig"
             >保存配置</n-button
           >
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- Black Market Purchase Modal -->
+    <n-modal
+      v-model:show="showBlackMarketPurchaseModal"
+      preset="card"
+      title="黑市采购清单配置"
+      style="width: 92%; max-width: 900px"
+    >
+      <div class="bm-config">
+        <n-alert type="info" show-icon class="bm-config-tip">
+          本地保存要下发到游戏服务器的黑市采购清单，点「保存配置」后需执行「一键配置黑市清单」才会写入服务器。
+          物品优先从下拉框选择，会自动带出 itemId 与推荐折扣；下拉里没有的可直接手填 itemId。
+          原价服务器不下发，需本地填写，填写后自动按游戏算法计算折扣价（折扣价 = 向上取整(折扣 ÷ 10 × 原价)）。
+        </n-alert>
+
+        <div class="bm-config-reader">
+          <span class="bm-config-reader-label">读取配置</span>
+          <n-select
+            v-model:value="blackMarketSourceTokenId"
+            :options="blackMarketTokenOptions"
+            placeholder="选择账号"
+            clearable
+            filterable
+            size="small"
+            class="bm-config-reader-select"
+          />
+          <n-button
+            size="small"
+            type="primary"
+            :loading="blackMarketReadLoading"
+            :disabled="blackMarketReadLoading || !blackMarketSourceTokenId"
+            @click="readBlackMarketPurchaseConfigFromServer"
+          >
+            读取该账号清单
+          </n-button>
+          <span class="bm-config-reader-hint">
+            读取服务器清单并覆盖下方编辑内容（不会自动保存）
+          </span>
+        </div>
+
+        <div class="bm-config-toolbar">
+          <n-button size="small" type="primary" @click="addBlackMarketPurchaseItem">
+            新增条目
+          </n-button>
+          <n-button size="small" @click="resetBlackMarketPurchaseList">
+            恢复默认
+          </n-button>
+          <span class="bm-config-count">
+            共 {{ blackMarketPurchaseList.length }} 项
+          </span>
+        </div>
+
+        <div class="bm-config-table">
+          <div class="bm-config-head">
+            <span>常用物品</span>
+            <span>itemId</span>
+            <span>原价</span>
+            <span>折扣</span>
+            <span>折扣价</span>
+            <span>备注</span>
+            <span class="bm-config-head-action">操作</span>
+          </div>
+
+          <div
+            v-for="(item, index) in blackMarketPurchaseList"
+            :key="`${index}-${item.itemId ?? 'new'}`"
+            class="bm-config-row"
+          >
+            <n-select
+              :value="item.itemId"
+              :options="blackMarketItemOptions"
+              placeholder="选择常用物品"
+              clearable
+              filterable
+              size="small"
+              @update:value="(value) => applyBlackMarketCatalogItem(index, value)"
+            />
+            <n-input-number
+              v-model:value="item.itemId"
+              placeholder="itemId"
+              :min="1"
+              size="small"
+              :show-button="false"
+            />
+            <n-input-number
+              v-model:value="item.price"
+              placeholder="原价"
+              :min="0"
+              size="small"
+              :show-button="false"
+            />
+            <n-input-number
+              v-model:value="item.discount"
+              placeholder="折扣"
+              :min="1"
+              :max="10"
+              size="small"
+            />
+            <span class="bm-config-price">
+              <template v-if="getBlackMarketDiscountedPrice(item) !== null">
+                {{ getBlackMarketDiscountedPrice(item) }}
+              </template>
+              <template v-else>—</template>
+            </span>
+            <n-input
+              v-model:value="item.note"
+              placeholder="备注（可选）"
+              size="small"
+            />
+            <n-button
+              size="small"
+              type="error"
+              tertiary
+              @click="removeBlackMarketPurchaseItem(index)"
+            >
+              删除
+            </n-button>
+          </div>
+
+          <div v-if="blackMarketPurchaseList.length === 0" class="bm-config-empty">
+            暂无条目，点击「新增条目」添加，或从上方账号读取服务器清单
+          </div>
+        </div>
+
+        <div class="bm-config-summary">
+          <span>
+            折扣价合计：
+            <strong>{{ blackMarketTotalPrice }}</strong>
+          </span>
+          <span>
+            已填原价 {{ blackMarketPricedCount }} /
+            {{ blackMarketPurchaseList.length }} 项
+          </span>
+        </div>
+
+        <div class="bm-config-actions">
+          <n-button size="small" @click="showBlackMarketPurchaseModal = false">
+            取消
+          </n-button>
+          <n-button
+            size="small"
+            type="primary"
+            @click="saveBlackMarketPurchaseConfig"
+          >
+            保存配置
+          </n-button>
         </div>
       </div>
     </n-modal>
@@ -3469,6 +3670,14 @@ import {
   createTasksCampChallenge,
   createTasksXuanwuBlessing,
 } from "@/utils/batch";
+import {
+  blackMarketItemCatalog,
+  createBlackMarketPurchaseEntry,
+  defaultBlackMarketPurchaseList,
+  getBlackMarketDiscountedPrice,
+  getBlackMarketTotalPrice,
+  normalizeBlackMarketPurchaseList,
+} from "@/utils/batch/blackMarketConfig";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 
@@ -4105,6 +4314,118 @@ const fetchConsumptionInfo = async () => {
 };
 
 // =====================
+// 金鱼资源：金砖 / 金鱼竿 / 招募令 / 宝箱积分
+// =====================
+const fishResourceLoading = ref(false);
+
+// 资源图标（金砖为项目内置 SVG，其余复用现有图标资源）
+const resourceIcon = (path) =>
+  import.meta.env.BASE_URL + path.replace(/^\//, "");
+
+// 宝箱积分折算权重：木质 1 / 青铜 10 / 黄金 20 / 铂金 50
+const BOX_POINT_WEIGHTS = [
+  [2001, 1],
+  [2002, 10],
+  [2003, 20],
+  [2004, 50],
+];
+
+// 数值按「万」显示，保留 2 位小数（如 123456 → 12.35w）
+const formatWan2 = (value) => `${((Number(value) || 0) / 10000).toFixed(2)}w`;
+
+// 从 role.items 中读取道具数量（兼容 number / {quantity|num|count} 结构）
+const pickItemQuantity = (items, itemId) => {
+  if (!items || typeof items !== "object") return 0;
+  const node = items[String(itemId)] ?? items[itemId];
+  if (node == null) return 0;
+  if (typeof node === "number") return Number(node) || 0;
+  if (typeof node === "object") {
+    return Number(node.quantity ?? node.num ?? node.count ?? 0) || 0;
+  }
+  return Number(node) || 0;
+};
+
+// 查询选中账号的金鱼资源并以表格写入日志（表格表头带资源图标）
+const fetchFishResource = async () => {
+  const targetIds =
+    selectedTokens.value.length > 0 ? [...selectedTokens.value] : [];
+  if (targetIds.length === 0) {
+    message.warning("没有可查询的账号");
+    return;
+  }
+  fishResourceLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询金鱼资源(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+  const rows = [];
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token ? token.name : tokenId;
+      try {
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const role = roleInfo?.role || {};
+        const items = role.items || {};
+
+        const diamond = Number(role.diamond ?? 0) || 0;
+        const goldRod = pickItemQuantity(items, 1012);
+        const recruitOrder = pickItemQuantity(items, 1001);
+        const boxPoints = BOX_POINT_WEIGHTS.reduce(
+          (sum, [id, weight]) => sum + pickItemQuantity(items, id) * weight,
+          0,
+        );
+
+        rows.push([
+          name,
+          formatWan2(diamond),
+          `${goldRod}`,
+          `${recruitOrder}`,
+          formatWan2(boxPoints),
+        ]);
+      } catch (e) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 查询金鱼资源失败: ${e?.message || e}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    fishResourceLoading.value = false;
+    if (rows.length > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `【金鱼资源】${rows.length} 个账号`,
+        table: {
+          header: "金鱼资源（金砖 / 金鱼竿 / 招募令 / 宝箱积分）",
+          columns: [
+            "账号",
+            { text: "金砖", icon: resourceIcon("/icons/jinzhuan.svg") },
+            { text: "金鱼竿", icon: resourceIcon("/fish/hjyg.png") },
+            { text: "招募令", icon: resourceIcon("/icons/zml.png") },
+            { text: "宝箱积分", icon: resourceIcon("/box/zsbx.png") },
+          ],
+          rows,
+        },
+        type: "info",
+      });
+    }
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 金鱼资源查询完成 ===`,
+      type: "info",
+    });
+  }
+};
+
+// =====================
 // 领取挂机：加钟次数（默认2，0=仅领取不加钟）
 // =====================
 const hangUpAddTimes = ref(2);
@@ -4493,8 +4814,17 @@ for (const merchantId in goldItemsConfig) {
   });
 }
 
+const createDefaultBlackMarketPurchaseList = () =>
+  defaultBlackMarketPurchaseList.map((item) => ({ ...item }));
+
+const blackMarketItemOptions = blackMarketItemCatalog.map((item) => ({
+  label: `${item.label} (${item.itemId})`,
+  value: item.itemId,
+}));
+
 const batchSettings = reactive({
   dreamPurchaseList: defaultDreamPurchaseList,
+  blackMarketPurchaseList: createDefaultBlackMarketPurchaseList(),
   boxCount: 100,
   fishCount: 100,
   recruitCount: 100,
@@ -4559,6 +4889,11 @@ const loadBatchSettings = () => {
       const parsed = JSON.parse(saved);
       Object.assign(batchSettings, parsed);
     }
+    batchSettings.blackMarketPurchaseList = normalizeBlackMarketPurchaseList(
+      batchSettings.blackMarketPurchaseList?.length
+        ? batchSettings.blackMarketPurchaseList
+        : createDefaultBlackMarketPurchaseList(),
+    );
   } catch (error) {
     console.error("Failed to load batch settings:", error);
   }
@@ -4639,6 +4974,7 @@ const taskGroupDefinitions = [
       "batchCampChallenge",
       "batchCampChallengePet",
       "batchCampClaimTasks",
+      "store_syncpurchaseconfig",
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
@@ -5058,6 +5394,7 @@ const exportConfig = () => {
         recruitCount: batchSettings.recruitCount,
         defaultBoxType: batchSettings.defaultBoxType,
         defaultFishType: batchSettings.defaultFishType,
+        blackMarketPurchaseList: batchSettings.blackMarketPurchaseList,
         carMinColor: batchSettings.carMinColor,
         commandDelay: batchSettings.commandDelay,
         taskDelay: batchSettings.taskDelay,
@@ -5169,6 +5506,12 @@ const importConfig = async ({ file }) => {
         // Import batch settings if provided
         if (importData.batchSettings) {
           Object.assign(batchSettings, importData.batchSettings);
+          batchSettings.blackMarketPurchaseList =
+            normalizeBlackMarketPurchaseList(
+              batchSettings.blackMarketPurchaseList?.length
+                ? batchSettings.blackMarketPurchaseList
+                : createDefaultBlackMarketPurchaseList(),
+            );
           saveBatchSettings();
         }
 
@@ -6046,6 +6389,128 @@ const executeHelper = () => {
 // Dream Buy Modal Logic
 const showDreamBuyModal = ref(false);
 const dreamBuyList = ref([]);
+
+// Black Market Purchase Modal Logic
+const showBlackMarketPurchaseModal = ref(false);
+const blackMarketPurchaseList = ref(createDefaultBlackMarketPurchaseList());
+const blackMarketSourceTokenId = ref(null);
+const blackMarketReadLoading = ref(false);
+
+const blackMarketTokenOptions = computed(() =>
+  tokens.value.map((token) => ({ label: token.name, value: token.id })),
+);
+
+const openBlackMarketPurchaseModal = () => {
+  blackMarketPurchaseList.value = normalizeBlackMarketPurchaseList(
+    batchSettings.blackMarketPurchaseList?.length
+      ? batchSettings.blackMarketPurchaseList
+      : createDefaultBlackMarketPurchaseList(),
+  ).map((item) => ({ ...item }));
+
+  // 默认选中账号列表中已勾选的第一个账号
+  blackMarketSourceTokenId.value = selectedTokens.value[0] ?? null;
+
+  showBlackMarketPurchaseModal.value = true;
+};
+
+// 读取指定账号在服务器上的采购清单，覆盖到当前编辑中的清单
+const readBlackMarketPurchaseConfigFromServer = async () => {
+  const tokenId = blackMarketSourceTokenId.value;
+
+  if (!tokenId) {
+    message.warning("请先选择要读取配置的账号");
+    return;
+  }
+
+  const token = tokens.value.find((t) => t.id === tokenId);
+  const tokenName = token ? token.name : tokenId;
+
+  blackMarketReadLoading.value = true;
+  try {
+    await ensureConnection(tokenId);
+
+    const currentPurchaseConfig = await readBlackMarketPurchaseConfig(tokenId);
+
+    if (currentPurchaseConfig.purchaseItemList.length === 0) {
+      message.warning(`${tokenName} 服务器上的黑市清单为空`);
+      return;
+    }
+
+    // 服务器不下发原价，读取时按 itemId 保留本地已填的原价，未填写的回退内置价格表
+    const localPriceMap = new Map(
+      blackMarketPurchaseList.value.map((item) => [item.itemId, item.price]),
+    );
+
+    blackMarketPurchaseList.value = normalizeBlackMarketPurchaseList(
+      currentPurchaseConfig.purchaseItemList.map((item) => ({
+        ...item,
+        price: localPriceMap.get(item.itemId) ?? 0,
+      })),
+    );
+
+    message.success(
+      `已读取 ${tokenName} 的黑市清单 ${currentPurchaseConfig.purchaseItemList.length} 项，点击「保存配置」后生效`,
+    );
+  } catch (error) {
+    message.error(`读取黑市清单失败: ${error?.message || error}`);
+  } finally {
+    blackMarketReadLoading.value = false;
+    tokenStore.closeWebSocketConnection(tokenId);
+    releaseConnectionSlot();
+  }
+};
+
+const blackMarketTotalPrice = computed(() =>
+  getBlackMarketTotalPrice(blackMarketPurchaseList.value),
+);
+
+const blackMarketPricedCount = computed(
+  () =>
+    blackMarketPurchaseList.value.filter((item) => item.price > 0).length,
+);
+
+const addBlackMarketPurchaseItem = () => {
+  blackMarketPurchaseList.value.push(createBlackMarketPurchaseEntry());
+};
+
+const applyBlackMarketCatalogItem = (index, itemId) => {
+  const current = blackMarketPurchaseList.value[index];
+  const next = createBlackMarketPurchaseEntry(itemId);
+
+  blackMarketPurchaseList.value[index] = {
+    ...current,
+    ...next,
+    // 原价是本地手工维护的，已填写过的值切换物品时不清空
+    price: current?.price || next.price,
+  };
+};
+
+const removeBlackMarketPurchaseItem = (index) => {
+  blackMarketPurchaseList.value.splice(index, 1);
+};
+
+const resetBlackMarketPurchaseList = () => {
+  blackMarketPurchaseList.value = createDefaultBlackMarketPurchaseList().map(
+    (item) => ({ ...item }),
+  );
+};
+
+const saveBlackMarketPurchaseConfig = () => {
+  const normalized = normalizeBlackMarketPurchaseList(
+    blackMarketPurchaseList.value,
+  );
+
+  if (normalized.length === 0) {
+    message.error("请至少配置一项黑市采购条目");
+    return;
+  }
+
+  batchSettings.blackMarketPurchaseList = normalized;
+  saveBatchSettings();
+
+  showBlackMarketPurchaseModal.value = false;
+  message.success("黑市采购清单已保存");
+};
 
 const openDreamBuyModal = () => {
   // Load saved settings
@@ -7695,6 +8160,8 @@ const {
   legion_storebuygoods,
   legionStoreBuySkinCoins,
   store_purchase,
+  store_syncpurchaseconfig,
+  readBlackMarketPurchaseConfig,
   collection_claimfreereward,
 } = tasksStore;
 
@@ -8405,6 +8872,170 @@ const stopBatch = () => {
 .log-table th {
   background: #e9e9e9;
   font-weight: 600;
+}
+
+/* 表格单元格内的图标 + 文字（金鱼资源等） */
+.log-table-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.log-table-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* 黑市采购清单配置弹窗 */
+.bm-config {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bm-config-tip {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.bm-config-reader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background-color: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+}
+
+.bm-config-reader-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #495057;
+  white-space: nowrap;
+}
+
+.bm-config-reader-select {
+  width: 220px;
+  max-width: 100%;
+}
+
+.bm-config-reader-hint {
+  font-size: 12px;
+  color: #868e96;
+}
+
+.bm-config-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bm-config-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #868e96;
+}
+
+.bm-config-table {
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.bm-config-head,
+.bm-config-row {
+  display: grid;
+  grid-template-columns:
+    minmax(140px, 1.3fr) 84px 96px 100px 82px minmax(110px, 1fr)
+    60px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.bm-config-head {
+  background-color: #f1f3f5;
+  font-size: 12px;
+  font-weight: 600;
+  color: #495057;
+}
+
+.bm-config-head-action {
+  text-align: center;
+}
+
+.bm-config-row + .bm-config-row {
+  border-top: 1px solid #f1f3f5;
+}
+
+.bm-config-row:hover {
+  background-color: #f8f9fa;
+}
+
+.bm-config-row :deep(.n-button) {
+  width: 100%;
+}
+
+.bm-config-price {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d9480f;
+  text-align: center;
+}
+
+.bm-config-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #495057;
+  background-color: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+}
+
+.bm-config-summary strong {
+  font-size: 14px;
+  color: #d9480f;
+}
+
+.bm-config-empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #adb5bd;
+}
+
+.bm-config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #f1f3f5;
+}
+
+@media (max-width: 600px) {
+  .bm-config-head {
+    display: none;
+  }
+
+  .bm-config-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .bm-config-row > :nth-child(1),
+  .bm-config-row > :nth-child(6),
+  .bm-config-row > :nth-child(7) {
+    grid-column: span 2;
+  }
 }
 
 /* 移动端：收紧表格字号与内边距，避免横向溢出 */

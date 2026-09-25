@@ -58,6 +58,7 @@ export const availableTasks = [
   { label: "一键领取怪异塔免费道具", value: "batchClaimFreeEnergy" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
+  { label: "一键配置黑市采购清单", value: "store_syncpurchaseconfig" },
   { label: "一键黑市采购", value: "store_purchase" },
   { label: "免费领取珍宝阁", value: "collection_claimfreereward" },
   { label: "批量领取功法残卷", value: "batchLegacyClaim" },

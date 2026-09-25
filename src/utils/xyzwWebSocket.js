@@ -201,6 +201,12 @@ export function registerDefaultCommands(reg) {
     .register("store_buy", { goodsId: 1 })
     .register("store_purchase", { goodsId: 1 })
     .register("store_refresh", { storeId: 1 })
+    .register("store_getpurchase")
+    .register("store_setpurchase", {
+      purchaseCnt: 1,
+      purchaseItemList: [],
+    })
+    .register("store_getpurchasehistory")
 
     // 军团
     .register("legion_getinfo")
@@ -1160,6 +1166,9 @@ export class XyzwWebSocketClient {
       presetteam_getinforesp: "presetteam_getinfo",
       mail_claimallattachmentresp: "mail_claimallattachment",
       store_buyresp: "store_purchase",
+      store_getpurchaseresp: "store_getpurchase",
+      store_setpurchaseresp: "store_setpurchase",
+      store_getpurchasehistoryresp: "store_getpurchasehistory",
       system_getdatabundleverresp: "system_getdatabundlever",
       tower_claimrewardresp: "tower_claimreward",
       fight_starttowerresp: "fight_starttower",
