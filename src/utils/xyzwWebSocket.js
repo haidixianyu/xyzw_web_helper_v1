@@ -319,6 +319,7 @@ export function registerDefaultCommands(reg) {
     .register("hero_gobackbattle")
     .register("artifact_load")
     .register("artifact_unload")
+    .register("artifact_upgradestar", { heroId: -1, itemId: 0 })
     .register("lordweapon_changedefaultweapon")
     .register("pearl_replaceskill")
     .register("pearl_exchangeskill")
@@ -1131,9 +1132,10 @@ export class XyzwWebSocketClient {
         const errorDesc =
           errorCodeMap[packet.code] || packet.hint || "未知错误";
 
-        promiseData.reject(
-          new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
-        );
+        const err = new Error(`服务器错误: ${packet.code} - ${errorDesc}`);
+        // 诊断用：记录究竟是哪个报文被匹配到了本次请求上
+        err.packetInfo = `响应cmd=${packet.cmd ?? "-"} resp=${packet.resp ?? "-"} code=${packet.code} 请求cmd=${promiseData.originalCmd}`;
+        promiseData.reject(err);
       }
       return;
     }
@@ -1304,8 +1306,10 @@ export class XyzwWebSocketClient {
         "hero_gobackbattle",
         "lordweapon_changedefaultweapon",
         "pkroom_appoint",
+        "artifact_upgradestar",
       ],
       syncrewardresp: [
+        "hero_heroupgradestar",
         "activity_commonbuygoods",
         "system_buygold",
         "discount_claimreward",
@@ -1360,9 +1364,10 @@ export class XyzwWebSocketClient {
           const errorDesc =
             errorCodeMap[packet.code] || packet.hint || "未知错误";
 
-          promiseData.reject(
-            new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
-          );
+          const err = new Error(`服务器错误: ${packet.code} - ${errorDesc}`);
+          // 诊断用：记录究竟是哪个报文被匹配到了本次请求上
+          err.packetInfo = `响应cmd=${packet.cmd ?? "-"} resp=${packet.resp ?? "-"} code=${packet.code} 请求cmd=${promiseData.originalCmd}`;
+          promiseData.reject(err);
         }
         break;
       }

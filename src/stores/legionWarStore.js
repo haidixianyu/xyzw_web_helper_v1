@@ -109,7 +109,13 @@ export const useLegionWarStore = defineStore("legionWar", () => {
         // 1. war_getbattlefieldinfo: 完整的战场快照
         if (cmd.includes("war_getbattlefieldinfo")) {
           // 更新数据
-          const extracted = extractValidData(msg.rawData);
+          let extracted = false;
+          try {
+            extracted = extractValidData(msg.rawData);
+          } catch (err) {
+            // 解析异常原先会被 WS 客户端外层 try 吞掉, 只停留在控制台, UI 表现为"已连接但一直无地图数据"
+            console.error("战场快照解析失败:", err, msg.rawData);
+          }
           if (extracted) {
             validData.value = extracted;
             lastUpdateTime.value = getCurrentTimeByFormat("HH:mm:ss");
@@ -157,10 +163,18 @@ export const useLegionWarStore = defineStore("legionWar", () => {
         battlefieldId: battlefieldId.value,
         useGzip: true,
       });
+      // 参考实现(huahuichin/xyzw_web_helper aaf9b12)的进场有两条路径: 连接时 gzip 进场 + 每轮非 gzip 进场。
+      // 本工具无法解压 gzip 响应体, 若服务端不接受 gzip 变体就会整场进不去(表现为"已连接但一直无地图数据"),
+      // 而盐场每周六才开一次, 因此两条路径都发, 保证能进场
+      legionWarWebSocket.send("war_enterbattlefield", {
+        battlefieldId: battlefieldId.value,
+      });
       isJoined.value = true;
 
       // 主动请求一次数据
       refreshData();
+      // 进场与快照请求存在时序差, 服务端可能对过早的快照请求不回包, 补一次
+      setTimeout(() => refreshData(), 2500);
     }
   };
 

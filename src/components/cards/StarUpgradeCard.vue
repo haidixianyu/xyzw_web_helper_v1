@@ -209,30 +209,25 @@ const runHeroUpgrade = async (mod) => {
     state.value.isRunning = true;
     for (const heroId of heroIds.value) {
       if (state.value.stopRequested) break;
-      let skip = false;
-      for (let i = 1; i <= 10; i++) {
-        if (state.value.stopRequested) {
-          skip = true;
-          break;
-        }
+      let count = 0;
+      // 一直升到服务端拒绝（碎片不足/已满星）为止，最多 60 次兜底
+      for (let i = 0; i < 60; i++) {
+        if (state.value.stopRequested) break;
         try {
-          const res = await tokenStore.sendMessageWithPromise(
+          // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
+          await tokenStore.sendMessageWithPromise(
             tokenId,
             "hero_heroupgradestar",
             { heroId },
             8000,
           );
-          const ok =
-            res && (res.code === 0 || res.success === true || res.result === 0);
-          addLog(`英雄ID:${heroId} 升星第${i}/10次`, ok ? "success" : "error");
-          if (!ok) throw new Error("升星失败");
+          count++;
         } catch (err) {
-          addLog(`英雄ID:${heroId} 升星第${i}/10次失败，跳过剩余次数`, "error");
-          skip = true;
+          break;
         }
         await sleep(mod.delay);
-        if (skip) break;
       }
+      if (count > 0) addLog(`英雄ID:${heroId} 升星 ${count} 次`, "success");
       state.value.done++;
     }
     message.success(state.value.stopRequested ? "已停止" : "英雄升星完成");
@@ -261,36 +256,25 @@ const runBookUpgrade = async (mod) => {
     state.value.isRunning = true;
     for (const heroId of heroIds.value) {
       if (state.value.stopRequested) break;
-      let skip = false;
-      for (let i = 1; i <= 10; i++) {
-        if (state.value.stopRequested) {
-          skip = true;
-          break;
-        }
+      let count = 0;
+      // 一直升到服务端拒绝（材料不足/已满星）为止，最多 60 次兜底
+      for (let i = 0; i < 60; i++) {
+        if (state.value.stopRequested) break;
         try {
-          const res = await tokenStore.sendMessageWithPromise(
+          // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
+          await tokenStore.sendMessageWithPromise(
             tokenId,
             "book_upgrade",
             { heroId },
             8000,
           );
-          const ok =
-            res && (res.code === 0 || res.success === true || res.result === 0);
-          addLog(
-            `英雄ID:${heroId} 图鉴升星第${i}/10次`,
-            ok ? "success" : "error",
-          );
-          if (!ok) throw new Error("图鉴升星失败");
+          count++;
         } catch (err) {
-          addLog(
-            `英雄ID:${heroId} 图鉴升星第${i}/10次失败，跳过剩余次数`,
-            "error",
-          );
-          skip = true;
+          break;
         }
         await sleep(mod.delay);
-        if (skip) break;
       }
+      if (count > 0) addLog(`英雄ID:${heroId} 图鉴升星 ${count} 次`, "success");
       state.value.done++;
     }
     message.success(state.value.stopRequested ? "已停止" : "图鉴升星完成");
@@ -317,28 +301,24 @@ const runClaimRewards = async (mod) => {
   }
   try {
     state.value.isRunning = true;
-    for (let i = 1; i <= 10; i++) {
+    // 一直领取到服务端拒绝（无可领取奖励）为止，最多 60 次兜底
+    for (let i = 0; i < 60; i++) {
       if (state.value.stopRequested) break;
-      let success = true;
       try {
-        const res = await tokenStore.sendMessageWithPromise(
+        // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
+        await tokenStore.sendMessageWithPromise(
           tokenId,
           "book_claimpointreward",
           {},
           8000,
         );
-        const ok =
-          res && (res.code === 0 || res.success === true || res.result === 0);
-        addLog(`领取图鉴奖励第${i}/10次`, ok ? "success" : "error");
-        if (!ok) throw new Error("领取奖励失败");
         state.value.done++;
+        addLog(`领取图鉴奖励成功 (第${i + 1}次)`, "success");
       } catch (err) {
-        addLog(`领取图鉴奖励第${i}/10次失败，跳过剩余次数`, "error");
-        state.value.done++;
-        success = false;
+        addLog("图鉴奖励领取结束（无可领取）");
+        break;
       }
       await sleep(mod.delay);
-      if (!success) break;
     }
     message.success(state.value.stopRequested ? "已停止" : "领取奖励完成");
   } finally {

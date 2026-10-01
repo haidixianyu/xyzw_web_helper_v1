@@ -722,6 +722,7 @@ export const useTokenStore = defineStore("tokens", () => {
     tokenId: string,
     base64Token: string,
     customWsUrl = null,
+    opts: { managed?: boolean } = {},
   ) => {
     wsLogger.info(`开始创建连接: ${tokenId}`);
 
@@ -793,6 +794,9 @@ export const useTokenStore = defineStore("tokens", () => {
         randomSeedSynced: false,
         lastRandomSeedSource: null,
         lastRandomSeed: null,
+        // 连接生命周期由调用方(批量执行器)接管：握手失败时不在此处自动刷新+重连，
+        // 否则会与调用方自己的重连逻辑抢连接锁、并绕过其并发队列
+        managed: !!opts.managed,
       };
 
       // 9. 设置事件监听（增强版）
@@ -826,8 +830,15 @@ export const useTokenStore = defineStore("tokens", () => {
 
           // 如果连接异常断开(1006)且从未连接成功(握手失败)，尝试刷新Token
           // connectedAt 为 null 表示 socket.onopen 还没触发就断开了，通常意味着握手失败（如403 Forbidden）
-          // 主动关闭(closeWebSocketConnection)不算握手失败，否则会与批量页的重连逻辑抢占连接锁
-          if (!opts.intentional && event.code === 1006 && !conn.connectedAt) {
+          // 主动关闭(closeWebSocketConnection)不算握手失败；
+          // managed 连接(批量任务接管)也不在此处自动重连——调用方有自己的重连+并发队列，
+          // 两边同时重连会抢连接锁，表现为「状态: connecting，连接锁被占用」
+          if (
+            !opts.intentional &&
+            !conn.managed &&
+            event.code === 1006 &&
+            !conn.connectedAt
+          ) {
             wsLogger.warn(`检测到握手失败(1006)，尝试刷新Token [${tokenId}]`);
             // 强制刷新并重连
             await attemptTokenRefresh(tokenId, true);

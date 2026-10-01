@@ -1111,6 +1111,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchFishUpgrade"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键鱼升星
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchBookUpgrade"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -5136,10 +5143,10 @@ const autumnVote = async () => {
         const owned = Number(
           roleInfo?.role?.items?.[AUTUMN_ITEM_ID]?.quantity || 0,
         );
-        if (owned < itemNum) {
+        if (owned <= 0) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${name} 蜜饯不足(现有 ${owned}, 需要 ${itemNum})，已跳过`,
+            message: `${name} 蜜饯不足(现有 ${owned})，已跳过`,
             type: "warning",
           });
           rows.push([
@@ -5152,17 +5159,26 @@ const autumnVote = async () => {
           ]);
           continue;
         }
+        // 输入数量超过剩余蜜饯时，以剩余数量为上限（不终止投票）
+        const useNum = Math.min(itemNum, owned);
+        if (useNum < itemNum) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${name} 输入 ${itemNum} 个超过剩余蜜饯 ${owned}，本次按 ${useNum} 个投票`,
+            type: "warning",
+          });
+        }
 
         const resp = await tokenStore.sendMessageWithPromise(
           tokenId,
           "autumn_useitem",
-          { itemNum },
+          { itemNum: useNum },
           8000,
         );
         const roleAutumn = resp?.roleAutumn || resp?.body?.roleAutumn || {};
         const distance = Number(roleAutumn.distance) || 0;
         const remain = Number(
-          resp?.role?.items?.[AUTUMN_ITEM_ID]?.quantity ?? owned - itemNum,
+          resp?.role?.items?.[AUTUMN_ITEM_ID]?.quantity ?? owned - useNum,
         );
         const gained = sumRewardItems(resp);
         const gainedText =
@@ -5173,18 +5189,18 @@ const autumnVote = async () => {
                   ([itemId, value]) => `${ITEM_NAMES[itemId] || itemId}×${value}`,
                 )
                 .join("、");
-        addAutumnTodayVotes(tokenId, itemNum);
+        addAutumnTodayVotes(tokenId, useNum);
         rows.push([
           name,
           `${autumnTodayVotes(tokenId)}`,
-          `${itemNum}`,
+          `${useNum}`,
           `${distance}`,
           `${remain}`,
           gainedText,
         ]);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${name} 投票成功: 蜜饯 ${itemNum} 个，今日已投 ${autumnTodayVotes(tokenId)}，当前距离 ${distance}，剩余蜜饯 ${remain}（服务端 itemNum=${roleAutumn.itemNum ?? "-"}, lastUseItemNum=${roleAutumn.lastUseItemNum ?? "-"}）`,
+          message: `${name} 投票成功: 蜜饯 ${useNum} 个，今日已投 ${autumnTodayVotes(tokenId)}，当前距离 ${distance}，剩余蜜饯 ${remain}（服务端 itemNum=${roleAutumn.itemNum ?? "-"}, lastUseItemNum=${roleAutumn.lastUseItemNum ?? "-"}）`,
           type: "success",
         });
       } catch (e) {
@@ -8283,22 +8299,24 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
 
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+      message: `${latestToken.name} 正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
       type: "info",
     });
 
     // 必须 await 并检查返回值：返回 null 表示本次根本没发起连接
     // (未拿到连接锁 / 其他标签页已有连接)，否则会被误判为"连接超时"
+    // managed: 连接生命周期由批量执行器接管，握手失败时不由 store 自动重连(避免抢锁)
     const createdClient = await tokenStore.createWebSocketConnection(
       tokenId,
       connectToken.token,
       connectToken.wsUrl,
+      { managed: true },
     );
     if (!createdClient) {
       const info = tokenStore.getConnectionInfo?.(tokenId);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `连接未创建: ${formatConnectionFailure(tokenId, info)}`,
+        message: `${latestToken.name} 连接未创建: ${formatConnectionFailure(tokenId, info)}`,
         type: "warning",
       });
     }
@@ -8308,7 +8326,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       const info = tokenStore.getConnectionInfo?.(tokenId);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `连接超时，尝试重连... (${formatConnectionFailure(tokenId, info)})`,
+        message: `${latestToken.name} 连接超时，尝试重连... (${formatConnectionFailure(tokenId, info)})`,
         type: "warning",
       });
 
@@ -8350,7 +8368,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       const currentToken = tokens.value.find((t) => t.id === tokenId);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `正在重连...${tokenChanged ? " (Token已刷新)" : ` (Token未变化, 最后刷新: ${currentToken?.lastRefreshed ? new Date(currentToken.lastRefreshed).toLocaleTimeString() : '无'})`}`,
+        message: `${latestToken.name} 正在重连...${tokenChanged ? " (Token已刷新)" : ` (Token未变化, 最后刷新: ${currentToken?.lastRefreshed ? new Date(currentToken.lastRefreshed).toLocaleTimeString() : '无'})`}`,
         type: "info",
       });
 
@@ -8359,12 +8377,13 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
         tokenId,
         refreshedToken.token,
         refreshedToken.wsUrl,
+        { managed: true },
       );
       if (!recreatedClient) {
         const info = tokenStore.getConnectionInfo?.(tokenId);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `重连未创建: ${formatConnectionFailure(tokenId, info)}`,
+          message: `${latestToken.name} 重连未创建: ${formatConnectionFailure(tokenId, info)}`,
           type: "warning",
         });
       }
@@ -8971,6 +8990,7 @@ const {
   batchFish,
   batchRecruit,
   batchHeroUpgrade,
+  batchFishUpgrade,
   batchBookUpgrade,
   batchClaimStarRewards,
   batchClaimPeachTasks,

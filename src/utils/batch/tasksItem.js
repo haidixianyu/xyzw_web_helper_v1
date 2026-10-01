@@ -42,6 +42,12 @@ export function createTasksItem(deps) {
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
 
+  // 升星安全上限：正常情况下靠服务端拒绝（碎片不足/已满星）结束循环，
+  // 这里只作为防止死循环的兜底。
+  const HERO_STAR_MAX_ATTEMPTS = 60;
+  // 鱼/神器每轮每个道具只会尝试一次升星，因此需要多轮才能把同一批低星道具逐级升上去
+  const FISH_PASS_MAX = 40;
+
   /**
    * 批量英雄升星
    */
@@ -70,47 +76,152 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        for (const heroId of heroIds) {
+        // 拉取角色数据，优先只处理账号实际拥有的武将（取不到则回退到全量武将表）
+        let targetHeroIds = heroIds;
+        let initialRole = null;
+        try {
+          const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          initialRole = roleInfo?.role || roleInfo;
+          const ownedHeroIds = Object.keys(initialRole?.heroes || {})
+            .map(Number)
+            .filter((n) => Number.isFinite(n));
+          if (ownedHeroIds.length > 0) targetHeroIds = ownedHeroIds;
+        } catch (err) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 获取角色信息失败，改用全量武将表: ${err.message}`,
+            type: "warning",
+          });
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 待检查武将 ${targetHeroIds.length} 个`,
+          type: "info",
+        });
+
+        // 本地学习的升星碎片消耗表：`${heroId}:${star}` -> 该星级升星所需碎片（跨账号/跨次复用）
+        const HERO_STAR_COST_KEY = "hero_star_cost_v1";
+        let heroStarCostMap = {};
+        try {
+          heroStarCostMap =
+            JSON.parse(localStorage.getItem(HERO_STAR_COST_KEY) || "{}") || {};
+        } catch (e) {
+          heroStarCostMap = {};
+        }
+
+        let upgradedTotal = 0;
+        let upgradedHeroCount = 0;
+        // 停止原因统计，便于排查“明明能升星却没有全部升星”的问题
+        const reasonStats = new Map();
+
+        for (const heroId of targetHeroIds) {
           if (shouldStop.value) break;
 
-          // 每个英雄尝试最多10次升星（只要成功就继续，失败则跳过该英雄）
-          for (let i = 1; i <= 10; i++) {
+          let star = Number(initialRole?.heroes?.[heroId]?.star);
+          let qty = Number(initialRole?.items?.[heroId]?.quantity);
+          let qtyKnown = Number.isFinite(qty);
+          let count = 0;
+          let stopReason = null;
+          let stopPacketInfo = "";
+
+          // 一直升到服务端拒绝（碎片不足/已满星）为止，最多 HERO_STAR_MAX_ATTEMPTS 次兜底
+          for (let i = 0; i < HERO_STAR_MAX_ATTEMPTS; i++) {
             if (shouldStop.value) break;
 
+            // 消耗下界：历史记录中该武将「不高于当前星级」的最大消耗。
+            // 星级越高所需碎片不会减少，所以它一定 <= 当前星级的真实消耗，用它做预检不会漏升。
+            let costFloor = 0;
+            const curStar = Number.isFinite(star) ? star : 0;
+            for (let s = 0; s <= curStar; s++) {
+              const c = Number(heroStarCostMap[`${heroId}:${s}`]);
+              if (Number.isFinite(c) && c > costFloor) costFloor = c;
+            }
+            // 客户端预检：碎片不足时直接跳过，不调用服务器接口
+            if (qtyKnown && costFloor > 0 && qty < costFloor) {
+              stopReason = `碎片不足(至少需${costFloor},有${qty})`;
+              break;
+            }
+
+            const qtyBefore = qty;
             try {
+              // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
               const res = await tokenStore.sendMessageWithPromise(
                 tokenId,
                 "hero_heroupgradestar",
                 { heroId },
-                5000,
+                8000,
               );
-              const ok =
-                res &&
-                (res.code === 0 || res.success === true || res.result === 0);
-
-              if (ok) {
-                addLog({
-                  time: new Date().toLocaleTimeString(),
-                  message: `${token.name} 英雄ID:${heroId} 升星成功 (第${i}次)`,
-                  type: "success",
-                });
-                // 成功了继续尝试下一级，直到失败或达到10次
-              } else {
-                // 失败说明无法继续升星（碎片不足或满星），跳出循环处理下一个英雄
-                throw new Error("升星失败");
+              const newStar = Number(res?.role?.heroes?.[heroId]?.star);
+              const newQty = Number(res?.role?.items?.[heroId]?.quantity);
+              // 用碎片减少量反推并记录该星级的升星消耗，供下次预检使用
+              if (
+                Number.isFinite(qtyBefore) &&
+                Number.isFinite(newQty) &&
+                newQty < qtyBefore &&
+                Number.isFinite(star)
+              ) {
+                heroStarCostMap[`${heroId}:${star}`] = qtyBefore - newQty;
               }
+              if (Number.isFinite(newStar)) star = newStar;
+              if (Number.isFinite(newQty)) {
+                qty = newQty;
+                qtyKnown = true;
+              }
+              count++;
+              upgradedTotal++;
             } catch (err) {
-              // 失败则停止当前英雄的升星尝试
+              stopReason = err?.message || String(err);
+              stopPacketInfo = err?.packetInfo || "";
               break;
             }
             await workerSleep(delayConfig.action);
           }
+
+          if (count > 0) {
+            upgradedHeroCount++;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 武将ID:${heroId} 升星 ${count} 次 (当前星级 ${star || "-"})${stopReason ? `，停止原因: ${stopReason}${stopPacketInfo ? ` [${stopPacketInfo}]` : ""}` : ""}`,
+              type: "success",
+            });
+          } else if (stopReason) {
+            let entry = reasonStats.get(stopReason);
+            if (!entry) {
+              entry = { count: 0, examples: [], packetInfo: stopPacketInfo };
+              reasonStats.set(stopReason, entry);
+            }
+            entry.count++;
+            if (entry.examples.length < 6) {
+              const st0 = initialRole?.heroes?.[heroId]?.star;
+              const qty0 = initialRole?.items?.[heroId]?.quantity;
+              entry.examples.push(
+                `${heroId}(星级${st0 ?? "?"},碎片${qty0 ?? "?"})`,
+              );
+            }
+          }
+        }
+
+        // 汇总各停止原因（含当前星级/碎片与命中报文），用于确认到底是“确实不能升”还是“逻辑漏了”
+        for (const [reason, entry] of reasonStats) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 未升星武将 ${entry.count} 个，原因: ${reason}${entry.packetInfo ? ` [${entry.packetInfo}]` : ""}${entry.examples.length ? `，示例: ${entry.examples.join("、")}` : ""}`,
+            type: "warning",
+          });
+        }
+
+        // 保存学习到的升星消耗，供下次预检使用
+        try {
+          localStorage.setItem(HERO_STAR_COST_KEY, JSON.stringify(heroStarCostMap));
+        } catch (e) {
+          // 忽略存储失败（隐私模式/容量不足）
         }
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} === 英雄升星完成 ===`,
+          message: `${token.name} === 英雄升星完成，${upgradedHeroCount} 个武将共升星 ${upgradedTotal} 次 ===`,
           type: "success",
         });
       } catch (error) {
@@ -131,6 +242,165 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("批量英雄升星结束");
+  };
+
+  /**
+   * 批量鱼/神器升星
+   * 命令 artifact_upgradestar {heroId, itemId}。
+   * itemId 必须是「账号实际持有的鱼/神器道具ID」，即 role.items 里的 5 位道具ID
+   * （规则: 鱼ID(4位) * 10 + 星级，如 14011 = 鱼 1401 的 1 星），
+   * 不能用 artifactBooks 里的 artifactId —— 那是图鉴记录的档位，账号未必持有，
+   * 直接发会得到 400000(物品不存在)/400160。
+   * 升星成功后该道具推进到下一档（itemId + 1）。
+   * 采用“多轮扫描”策略：每轮重新拉取角色数据（拿到最新的道具ID与数量），
+   * 按道具ID升序（即按鱼分组、星级从低到高）各尝试一次，
+   * 直到某一轮没有任何成功为止。
+   */
+  const batchFishUpgrade = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始鱼升星: ${token.name} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        let upgradedTotal = 0;
+        // 已尝试失败的道具ID，后续轮次不再重复请求
+        const fishFailed = new Set();
+        const fishReasonStats = new Map();
+        for (let pass = 0; pass < FISH_PASS_MAX; pass++) {
+          if (shouldStop.value) break;
+
+          const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const role = roleInfo?.role || roleInfo;
+
+          // 鱼ID前缀集合：artifactBooks 的 key 是 4 位鱼ID，道具ID 的前 4 位即鱼ID
+          const fishIdSet = new Set();
+          for (const key of Object.keys(role?.artifactBooks || {})) {
+            const k = String(key).trim();
+            if (/^\d{4,5}$/.test(k)) fishIdSet.add(k.substring(0, 4));
+          }
+          // 兜底：已附身武将的 artifactId 同样是 5 位道具ID，可反推鱼ID
+          for (const hero of Object.values(role?.heroes || {})) {
+            const aid = String(hero?.artifactId ?? "");
+            if (/^\d{5}$/.test(aid)) fishIdSet.add(aid.substring(0, 4));
+          }
+
+          // 道具ID -> 附身武将ID（未附身用 -1）
+          const holderMap = {};
+          for (const [hid, hero] of Object.entries(role?.heroes || {})) {
+            const aid = Number(hero?.artifactId);
+            if (Number.isFinite(aid) && aid > 0) holderMap[aid] = Number(hid);
+          }
+
+          // 候选 = 实际持有的鱼/神器道具；itemId 升序 == 按鱼分组、星级从低到高
+          const candidates = [];
+          for (const [key, item] of Object.entries(role?.items || {})) {
+            const itemId = Number(item?.itemId ?? key);
+            if (!Number.isFinite(itemId) || itemId <= 0) continue;
+            if (!fishIdSet.has(String(itemId).substring(0, 4))) continue;
+            const qty = Number(item?.quantity ?? 0);
+            if (!Number.isFinite(qty) || qty <= 0) continue;
+            if (fishFailed.has(itemId)) continue;
+            candidates.push(itemId);
+          }
+          candidates.sort((a, b) => a - b);
+
+          if (pass === 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 检测到持有的鱼/神器 ${candidates.length} 种 (图鉴鱼 ${fishIdSet.size} 种)`,
+              type: "info",
+            });
+          }
+          if (candidates.length === 0) break;
+
+          let passSuccess = 0;
+          for (const itemId of candidates) {
+            if (shouldStop.value) break;
+
+            const heroId = holderMap[itemId] ?? -1;
+            try {
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "artifact_upgradestar",
+                { heroId, itemId },
+                8000,
+              );
+              passSuccess++;
+              upgradedTotal++;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 鱼/神器 ID:${itemId} 升星成功`,
+                type: "success",
+              });
+            } catch (err) {
+              // 该道具本轮无法升星（材料不足/已满星等），记录原因并跳过
+              fishFailed.add(itemId);
+              const reason = err?.message || String(err);
+              let entry = fishReasonStats.get(reason);
+              if (!entry) {
+                entry = { count: 0, examples: [], packetInfo: err?.packetInfo || "" };
+                fishReasonStats.set(reason, entry);
+              }
+              entry.count++;
+              if (entry.examples.length < 6) entry.examples.push(String(itemId));
+            }
+            await workerSleep(delayConfig.action);
+          }
+
+          if (passSuccess === 0) break;
+        }
+
+        for (const [reason, entry] of fishReasonStats) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 鱼/神器升星失败 ${entry.count} 种，原因: ${reason}${entry.packetInfo ? ` [${entry.packetInfo}]` : ""}${entry.examples.length ? `，示例ID: ${entry.examples.join("、")}` : ""}`,
+            type: "warning",
+          });
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} === 鱼升星完成，共升星 ${upgradedTotal} 次 ===`,
+          type: "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `鱼升星失败: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量鱼升星结束");
   };
 
   /**
@@ -161,47 +431,45 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
+        let upgradedTotal = 0;
         for (const heroId of heroIds) {
           if (shouldStop.value) break;
 
-          // 每个英雄尝试最多10次图鉴升星（只要成功就继续，失败则跳过该英雄）
-          for (let i = 1; i <= 10; i++) {
+          let count = 0;
+          // 一直升到服务端拒绝（材料不足/已满星）为止，最多 HERO_STAR_MAX_ATTEMPTS 次兜底
+          for (let i = 0; i < HERO_STAR_MAX_ATTEMPTS; i++) {
             if (shouldStop.value) break;
 
             try {
-              const res = await tokenStore.sendMessageWithPromise(
+              // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
+              await tokenStore.sendMessageWithPromise(
                 tokenId,
                 "book_upgrade",
                 { heroId },
-                5000,
+                8000,
               );
-              const ok =
-                res &&
-                (res.code === 0 || res.success === true || res.result === 0);
-
-              if (ok) {
-                addLog({
-                  time: new Date().toLocaleTimeString(),
-                  message: `${token.name} 英雄ID:${heroId} 图鉴升星成功 (第${i}次)`,
-                  type: "success",
-                });
-                // 成功了继续尝试下一级，直到失败或达到10次
-              } else {
-                // 失败说明无法继续图鉴升星（碎片不足或满星），跳出循环处理下一个英雄
-                throw new Error("图鉴升星失败");
-              }
             } catch (err) {
-              // 失败则停止当前英雄的图鉴升星尝试
+              // 服务端拒绝（材料不足或满星），停止该武将
               break;
             }
+            count++;
+            upgradedTotal++;
             await workerSleep(delayConfig.action);
+          }
+
+          if (count > 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 英雄ID:${heroId} 图鉴升星 ${count} 次`,
+              type: "success",
+            });
           }
         }
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} === 图鉴升星完成 ===`,
+          message: `${token.name} === 图鉴升星完成，共升星 ${upgradedTotal} 次 ===`,
           type: "success",
         });
       } catch (error) {
@@ -252,30 +520,24 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        for (let i = 1; i <= 10; i++) {
+        // 一直领取到服务端拒绝（无可领取奖励）为止，最多 60 次兜底
+        for (let i = 0; i < 60; i++) {
           if (shouldStop.value) break;
           try {
-            const res = await tokenStore.sendMessageWithPromise(
+            // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
+            await tokenStore.sendMessageWithPromise(
               tokenId,
               "book_claimpointreward",
               {},
-              5000,
+              8000,
             );
-            const ok =
-              res && (res.code === 0 || res.success === true || res.result === 0);
-
-            if (ok) {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 领取图鉴奖励成功`,
-                type: "success",
-              });
-            } else {
-              // 如果领取失败（比如没有奖励可领了），停止尝试
-              throw new Error("领取奖励失败");
-            }
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 领取图鉴奖励成功`,
+              type: "success",
+            });
           } catch (err) {
-            // 失败则停止尝试
+            // 领取失败（比如没有奖励可领了），停止尝试
             break;
           }
           await workerSleep(delayConfig.action);
@@ -1465,6 +1727,7 @@ export function createTasksItem(deps) {
     batchFish,
     batchRecruit,
     batchHeroUpgrade,
+    batchFishUpgrade,
     batchBookUpgrade,
     batchClaimStarRewards,
     batchClaimPeachTasks,

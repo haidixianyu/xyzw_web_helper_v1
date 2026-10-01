@@ -2794,24 +2794,28 @@ const colorArray = [
   if (!rawResult || !rawResult.battlefield) {
     return false;
   }
-  let buildingData = rawResult.battlefield.buildingData;
-  let legionInfo = Object.fromEntries(Object.values(rawResult.battlefield.legions).map((item,index) => {
+  const battlefield = rawResult.battlefield;
+  // 服务端对空字段可能整体不下发(如无四圣时没有 blessingIdList、无自定义数据时没有 custom),
+  // 原先直接取属性会抛异常, 异常被 WS 外层 try 吞掉 → 表现为"已连接但地图一直无数据", 这里全部容错
+  let buildingData = battlefield.buildingData || {};
+  let legionInfo = Object.fromEntries(Object.values(battlefield.legions || {}).map((item) => {
+    const custom = item.custom || {};
     return [item.id, {
-      "blessingCount": item.blessingIdList.length, //四圣个数
-      "blessingScore": item.blessingScore, //四圣分数
-      "buildings": item.buildings, //占领的点位
-      "redCount": item.custom["red:quench"] || 0, //俱乐部红数
+      "blessingCount": Array.isArray(item.blessingIdList) ? item.blessingIdList.length : 0, //四圣个数
+      "blessingScore": item.blessingScore || 0, //四圣分数
+      "buildings": item.buildings || {}, //占领的点位
+      "redCount": custom["red:quench"] || 0, //俱乐部红数
       "killCnt": item.killCnt, //击杀数
       "level": item.level, //俱乐部等级
       "name": item.name, //俱乐部名称
       "color": colorArray[item.color], //俱乐部颜色
       "id": item.id, //俱乐部序号
-      "memberCount": Object.keys(item.membersV2).length,
+      "memberCount": Object.keys(item.membersV2 || {}).length,
       "point": item.point, //老版的分
       "position": item.position, //大本营坐标
       "strongholdId": item.strongholdId,//大本营坐标字符串
-      "score": Object.keys(item?.buildings||{}).map(item => buildingData[item]?.point??0).reduce((total, current) => total + current,0)
-      +item.blessingScore,//积分
+      "score": Object.keys(item.buildings||{}).map(item => buildingData[item]?.point??0).reduce((total, current) => total + current,0)
+      + (item.blessingScore || 0),//积分
       "power": item.power, //战力
       "OnlineCount": 0,//在线人数
       "participantsCount": 0,//在线人数
@@ -2821,16 +2825,21 @@ const colorArray = [
     }]
   }))
   //统计具体信息
-  let memberInfo = Object.values(rawResult.battlefield.roles).map(item => {
-    legionInfo[item.legionID + ""].participantsCount++;
-    if (item.isOnline) {
-      legionInfo[item.legionID + ""].OnlineCount++;
+  //角色可能属于 legions 里不存在的军团(散人/军团已退场), 原写法会取到 undefined 后自增直接抛 TypeError,
+  //导致整份战场快照解析失败(UI 表现为"已连接但一直无地图数据"), 这里按"找不到军团则跳过统计"处理
+  let memberInfo = Object.values(battlefield.roles || {}).map(item => {
+    const ownerLegion = legionInfo[item.legionID + ""];
+    if (ownerLegion) {
+      ownerLegion.participantsCount++;
+      if (item.isOnline) {
+        ownerLegion.OnlineCount++;
+      }
+      ownerLegion.reviveCount += item.revive || 0;
+      ownerLegion.danCount += item.d - 6 > 0 ? item.d - 6 : 0;
     }
-    legionInfo[item.legionID].reviveCount += item.revive;
-    legionInfo[item.legionID].danCount += item.d - 6 > 0 ? item.d - 6 : 0;
     return {
       "name": item.name,
-      "legionName": legionInfo[item.legionID].name,
+      "legionName": ownerLegion ? ownerLegion.name : "",
       "legionId": item.legionID,
       "lastState": formatState(item.state),
       "digGround": item.aB, //刨地

@@ -10,6 +10,11 @@
  *     - doReceive(e): e = {cmd, code, rawData(解码响应体)} → 记录 "<<" 响应
  *   心跳/ack 走 doSend 而非 send, 且 cmd 以 "_sys/" 开头, 这里统一过滤, 不占日志空间。
  *
+ * 附带"盐场邀请"专项诊断: 游戏侧 _InviteJoinTeamResp 以 `e.data.code||(...)` 开头,
+ *   邀请失败(服务端返回非 0 错误码)会被静默丢弃, 表现为"点邀请没反应也没报错"。
+ *   这里对 `params.targetCodeId` 出帧与 `*invitejointeam*` 响应code 各弹一次屏幕提示,
+ *   并在缓冲区记为 ">>invite" 条目, 便于在盐场开放时段直接看到失败原因。
+ *
  * 开关(需求#4): 仅当账号开启 WS 日志时才注入、显示 📡 雷达、记录日志。
  *   读取键: localStorage['ws_log_enabled:' + current_bin_id] === '1'
  *   (multi-game 下 current_bin_id 走账号隔离作用域; 开关值由 token 页写入顶层, 回退读 window.top)
@@ -64,6 +69,39 @@
   var CAP = [];
   var MAX = 400;
   var AUTO_RE = /异常|客户端|封禁|illegal|forbidden/i;
+
+  // ============ 0.1) 连接健康诊断 ============
+  // 盲点: 命令级 ">>" 是在引擎 send 包装层记录的, 不看 socket 的 readyState, 所以
+  // 「往已断开的连接里写」和「连接正常但服务端不回包」在日志里长得一模一样。
+  // 这里补上 socket 生命周期(open/close/error)与 readyState, 并在「发出请求后长时间
+  // 零入站」时告警, 用于区分服务端静默与客户端僵尸连接。
+  var WS_STATE_NAMES = { 0: "CONNECTING", 1: "OPEN", 2: "CLOSING", 3: "CLOSED" };
+  var STALL_MS = 15000; // 有未回包请求且超过该时长无任何入站帧, 判定为僵尸连接
+  var lastSendAt = 0;
+  var lastRecvAt = 0;
+  var pendingSinceRecv = 0; // 自上次收到任何入站帧以来发出的帧数
+  var stallAlerted = false;
+  var sockets = [];
+  function wsState(ws) {
+    try {
+      return WS_STATE_NAMES[ws.readyState] || String(ws.readyState);
+    } catch (e) {
+      return "?";
+    }
+  }
+  function socketOverview() {
+    return sockets.map(function (s) {
+      return {
+        id: s.id,
+        url: s.url,
+        state: wsState(s.ws),
+        sent: s.sent,
+        recv: s.recv,
+        aliveMs: (s.closedAt || Date.now()) - s.bornAt,
+        close: s.close,
+      };
+    });
+  }
 
   function now() {
     var d = new Date();
@@ -126,6 +164,9 @@
           if (!e) return;
           if (e.cmd || e.c !== undefined) {
             if (isSys(e.cmd)) return;
+            // 只有业务命令才参与「僵尸连接」判定: 心跳不计, 避免空闲时误报
+            lastSendAt = Date.now();
+            pendingSinceRecv++;
             push({
               k: ">>",
               cmd: e.cmd || "c:" + e.c,
@@ -135,6 +176,16 @@
           } else {
             // 结构未知(既无 cmd 也无 c): 仍记录, 便于诊断真实入参形态
             push({ k: ">>?", keys: brief(Object.keys(e)), raw: brief(e, 500) });
+          }
+          // 盐场邀请专项诊断: 邀请报文参数为 { battlefieldId, targetCodeId }
+          // 游戏侧点击邀请既无出帧提示、响应错误码又被静默吞掉, 这里显式提示便于定位
+          if (e.params && typeof e.params === "object" && e.params.targetCodeId !== undefined) {
+            push({ k: ">>invite", params: brief(e.params, 500) });
+            toast(
+              "盐场邀请请求已发出\ntargetCodeId=" + e.params.targetCodeId +
+                "\nbattlefieldId=" + e.params.battlefieldId,
+              true
+            );
           }
         } catch (_) {}
       }
@@ -235,6 +286,11 @@
               code: e.code,
               data: data === undefined || data === null ? null : brief(data, 8000),
             });
+            // 盐场邀请专项诊断: 游戏侧 _InviteJoinTeamResp 以 `e.data.code||(...)` 开头,
+            // 任何非 0 错误码都会被静默丢弃(点击后无任何提示), 这里把 code 显式弹出来
+            if (/invitejointeam/i.test(e.cmd)) {
+              toast("盐场邀请响应 code=" + e.code, !e.code);
+            }
           }
         } catch (_) {}
         return origRecv.apply(this, arguments);
@@ -333,7 +389,72 @@
     var PatchedWS = function (url, protocols) {
       var ws = protocols !== undefined ? new NativeWS(url, protocols) : new NativeWS(url);
       try {
-        push({ k: "ws-open", url: String(url).slice(0, 200) });
+        var sock = {
+          id: sockets.length + 1,
+          ws: ws,
+          url: String(url).slice(0, 200),
+          bornAt: Date.now(),
+          closedAt: 0,
+          sent: 0,
+          recv: 0,
+          close: null,
+        };
+        sockets.push(sock);
+        push({ k: "ws-open", sock: sock.id, url: sock.url });
+        // 新建连接视为活跃起点, 避免刚开局就误报僵尸
+        lastRecvAt = Date.now();
+        pendingSinceRecv = 0;
+        stallAlerted = false;
+
+        // 用原生 addEventListener 挂生命周期, 不覆盖游戏自己的 onopen/onclose/onerror
+        ws.addEventListener("open", function () {
+          try {
+            push({ k: "ws-onopen", sock: sock.id, ms: Date.now() - sock.bornAt });
+          } catch (_) {}
+        });
+        ws.addEventListener("close", function (ev) {
+          try {
+            sock.closedAt = Date.now();
+            sock.close = {
+              code: ev && ev.code,
+              reason: (ev && ev.reason) || "",
+              clean: ev && ev.wasClean,
+            };
+            // 关键证据: 服务端主动断连会在这里留下 code/reason
+            push({
+              k: "ws-onclose",
+              sock: sock.id,
+              code: ev && ev.code,
+              reason: (ev && ev.reason) || "",
+              clean: ev && ev.wasClean,
+              aliveMs: sock.closedAt - sock.bornAt,
+              sent: sock.sent,
+              recv: sock.recv,
+            });
+          } catch (_) {}
+        });
+        ws.addEventListener("error", function () {
+          try {
+            push({
+              k: "ws-onerror",
+              sock: sock.id,
+              state: wsState(ws),
+              sent: sock.sent,
+              recv: sock.recv,
+            });
+          } catch (_) {}
+        });
+        ws.addEventListener("message", function () {
+          // 任意入站字节(含被过滤掉的 _sys/ 心跳)都算连接活跃, 这是判定僵尸连接的主依据
+          sock.recv++;
+          lastRecvAt = Date.now();
+          pendingSinceRecv = 0;
+          if (stallAlerted) {
+            stallAlerted = false;
+            push({ k: "ws-recv-resumed", sock: sock.id, recv: sock.recv });
+          }
+        });
+
         // 诊断: 统计原生 socket 真实发出的帧(引擎 doSend 直发时不经过 send, 这里兜底计数)
         var rawSend = ws.send;
         ws.send = function (d) {
@@ -341,11 +462,24 @@
             var n = typeof d === "string" ? d.length : d && d.byteLength !== undefined ? d.byteLength : -1;
             if (ws.__xyzwOutFrames === undefined) ws.__xyzwOutFrames = 0;
             ws.__xyzwOutFrames++;
+            sock.sent++;
             if (ws.__xyzwOutFrames <= 30) {
-              push({ k: ">>bin", bytes: n });
+              push({ k: ">>bin", bytes: n, state: wsState(ws) });
+            }
+            // 关键证据: 往非 OPEN 的连接里写, 数据被静默丢弃(不抛错也不回包)
+            if (ws.readyState !== 1) {
+              push({ k: ">>dead", sock: sock.id, bytes: n, state: wsState(ws) });
             }
           } catch (_) {}
-          return rawSend.apply(ws, arguments);
+          try {
+            return rawSend.apply(ws, arguments);
+          } catch (err) {
+            // CONNECTING 态下 send 会抛 InvalidStateError: 原样抛回, 但留下证据
+            try {
+              push({ k: ">>fail", sock: sock.id, state: wsState(ws), err: String(err) });
+            } catch (_) {}
+            throw err;
+          }
         };
       } catch (e) {}
       return ws;
@@ -378,6 +512,31 @@
       return orig.apply(console, arguments);
     };
   });
+
+  // 僵尸连接看门狗: 已经发出过帧, 但超过 STALL_MS 一帧入站都没有 → 告警一次
+  setInterval(function () {
+    try {
+      if (pendingSinceRecv <= 0 || !lastRecvAt) return;
+      var idle = Date.now() - lastRecvAt;
+      if (idle < STALL_MS) return;
+      var last = sockets.length ? sockets[sockets.length - 1] : null;
+      var state = last ? wsState(last.ws) : "none";
+      if (stallAlerted) return;
+      stallAlerted = true;
+      push({
+        k: "ws-stall",
+        idleMs: idle,
+        state: state,
+        pending: pendingSinceRecv,
+        sockets: socketOverview(),
+      });
+      toast(
+        "⚠ 连接疑似僵尸: 已发出 " + pendingSinceRecv + " 帧, " +
+          Math.round(idle / 1000) + " 秒内零回包 (socket=" + state + ")\n点 📡 导出日志即可定位",
+        false
+      );
+    } catch (_) {}
+  }, 5000);
 
   // ============ 3) 导出 ============
   function toast(msg, ok) {
@@ -424,13 +583,25 @@
       hooked: protoPatched,
       instSend: instSendPatched,
       ver: typeof GAME_VERSION !== "undefined" ? GAME_VERSION : "?",
+      // 连接健康: 用于区分「服务端不回包」与「连接已断/僵尸」
+      conn: {
+        state: sockets.length ? wsState(sockets[sockets.length - 1].ws) : "none",
+        lastRecvAt: lastRecvAt ? new Date(lastRecvAt).toISOString() : null,
+        lastSendAt: lastSendAt ? new Date(lastSendAt).toISOString() : null,
+        silentMs: lastRecvAt ? Date.now() - lastRecvAt : null,
+        pending: pendingSinceRecv,
+        stalled: stallAlerted,
+        sockets: socketOverview(),
+      },
       events: rows,
     });
     try {
       localStorage.setItem("xyzw_ws_capture", json);
     } catch (e) {}
     console.log(
-      "%c[ws-capture] 导出 " + rows.length + " 条 (" + (tag || "manual") + ", 挂钩=" + (protoPatched ? "✓" : "✗") + ")",
+      "%c[ws-capture] 导出 " + rows.length + " 条 (" + (tag || "manual") + ", 挂钩=" + (protoPatched ? "✓" : "✗") +
+        ", 连接=" + (sockets.length ? wsState(sockets[sockets.length - 1].ws) : "无") +
+        ", 静默=" + (lastRecvAt ? Math.round((Date.now() - lastRecvAt) / 1000) + "s" : "-") + ")",
       "color:#4ade80;font-weight:bold"
     );
     try {
