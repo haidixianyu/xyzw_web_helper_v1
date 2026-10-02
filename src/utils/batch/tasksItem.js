@@ -1,4 +1,4 @@
-import { HERO_DICT } from "@/utils/HeroList";
+import { HERO_DICT, FishMap } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
 import { workerSleep } from "../workerTimer.js";
 
@@ -42,11 +42,71 @@ export function createTasksItem(deps) {
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
 
-  // 升星安全上限：正常情况下靠服务端拒绝（碎片不足/已满星）结束循环，
+  // 武将ID -> 中文名，未收录的ID回退显示原始数字，便于日志直观查看
+  const heroName = (heroId) => HERO_DICT[heroId]?.name || String(heroId);
+
+  // 鱼/神器道具ID(5位) -> 中文名：前4位是鱼ID，查 FishMap；未收录回退显示原始数字
+  const fishName = (itemId) =>
+    FishMap[String(itemId).substring(0, 4)]?.name || String(itemId);
+
+  // 鱼品质档位（按鱼ID前缀划分）-> 每次升星消耗的「本体」数量
+  // 1601-1604 稀有20只 / 1501-1506 史诗5只 / 1401-1412 传说2只
+  // 1301-1305 神话1只 / 1201-1220 传奇1只
+  const FISH_STAR_TIERS = [
+    { min: 1601, max: 1604, cost: 20, name: "稀有" },
+    { min: 1501, max: 1506, cost: 5, name: "史诗" },
+    { min: 1401, max: 1412, cost: 2, name: "传说" },
+    { min: 1301, max: 1305, cost: 1, name: "神话" },
+    { min: 1201, max: 1220, cost: 1, name: "传奇" },
+  ];
+
+  /**
+   * 取鱼升星所需本体数量
+   * @param {number} itemId 鱼/神器道具ID(5位)
+   * @returns {{cost:number,name:string}|null} 品质未知(如神器)时返回 null，不预检交由服务端判断
+   */
+  const getFishStarCost = (itemId) => {
+    const fishId = Number(String(itemId).substring(0, 4));
+    if (!Number.isFinite(fishId)) return null;
+    const tier = FISH_STAR_TIERS.find(
+      (t) => fishId >= t.min && fishId <= t.max,
+    );
+    return tier ? { cost: tier.cost, name: tier.name } : null;
+  };
+
+  // 升星安全上限：正常情况下靠客户端档位预检 + 服务端拒绝结束循环，
   // 这里只作为防止死循环的兜底。
   const HERO_STAR_MAX_ATTEMPTS = 60;
   // 鱼/神器每轮每个道具只会尝试一次升星，因此需要多轮才能把同一批低星道具逐级升上去
   const FISH_PASS_MAX = 40;
+
+  // 英雄升星碎片消耗档位表（按当前星级所在档位取每次升星所需碎片）
+  // 黄星1-5星: 8个(档内累计40) / 紫星6-10星: 40个(200) / 橙星11-15星: 80个(400)
+  // 红星16-20星: 200个(1000) / 皇冠21-25星: 400个(2000) / 紫晶26-30星: 400个(2000)
+  const HERO_STAR_TIERS = [
+    { max: 5, cost: 8, name: "黄星" },
+    { max: 10, cost: 40, name: "紫星" },
+    { max: 15, cost: 80, name: "橙星" },
+    { max: 20, cost: 200, name: "红星" },
+    { max: 25, cost: 400, name: "皇冠" },
+    { max: 30, cost: 400, name: "紫晶" },
+  ];
+  // 最高星级，达到后无法再升星
+  const HERO_STAR_MAX = HERO_STAR_TIERS[HERO_STAR_TIERS.length - 1].max;
+
+  /**
+   * 根据当前星级取升星所需碎片
+   * @param {number} star 当前星级
+   * @returns {{cost:number,name:string,isMax:boolean}|null} 星级未知时返回 null
+   */
+  const getHeroStarCost = (star) => {
+    if (!Number.isFinite(star) || star <= 0) return null;
+    if (star >= HERO_STAR_MAX) return { cost: 0, name: "已满星", isMax: true };
+    const tier =
+      HERO_STAR_TIERS.find((t) => star <= t.max) ||
+      HERO_STAR_TIERS[HERO_STAR_TIERS.length - 1];
+    return { cost: tier.cost, name: tier.name, isMax: false };
+  };
 
   /**
    * 批量英雄升星
@@ -100,19 +160,9 @@ export function createTasksItem(deps) {
           type: "info",
         });
 
-        // 本地学习的升星碎片消耗表：`${heroId}:${star}` -> 该星级升星所需碎片（跨账号/跨次复用）
-        const HERO_STAR_COST_KEY = "hero_star_cost_v1";
-        let heroStarCostMap = {};
-        try {
-          heroStarCostMap =
-            JSON.parse(localStorage.getItem(HERO_STAR_COST_KEY) || "{}") || {};
-        } catch (e) {
-          heroStarCostMap = {};
-        }
-
         let upgradedTotal = 0;
         let upgradedHeroCount = 0;
-        // 停止原因统计，便于排查“明明能升星却没有全部升星”的问题
+        // 跳过原因统计，便于排查“明明能升星却没有全部升星”的问题
         const reasonStats = new Map();
 
         for (const heroId of targetHeroIds) {
@@ -129,21 +179,17 @@ export function createTasksItem(deps) {
           for (let i = 0; i < HERO_STAR_MAX_ATTEMPTS; i++) {
             if (shouldStop.value) break;
 
-            // 消耗下界：历史记录中该武将「不高于当前星级」的最大消耗。
-            // 星级越高所需碎片不会减少，所以它一定 <= 当前星级的真实消耗，用它做预检不会漏升。
-            let costFloor = 0;
-            const curStar = Number.isFinite(star) ? star : 0;
-            for (let s = 0; s <= curStar; s++) {
-              const c = Number(heroStarCostMap[`${heroId}:${s}`]);
-              if (Number.isFinite(c) && c > costFloor) costFloor = c;
+            // 按档位表预检：已满星或碎片不足时直接跳过，不调用服务器接口
+            const starCost = getHeroStarCost(star);
+            if (starCost?.isMax) {
+              stopReason = `已满星(${star}星)`;
+              break;
             }
-            // 客户端预检：碎片不足时直接跳过，不调用服务器接口
-            if (qtyKnown && costFloor > 0 && qty < costFloor) {
-              stopReason = `碎片不足(至少需${costFloor},有${qty})`;
+            if (qtyKnown && starCost && qty < starCost.cost) {
+              stopReason = `碎片不足(${starCost.name}需${starCost.cost}个)`;
               break;
             }
 
-            const qtyBefore = qty;
             try {
               // 成功时 Promise 会 resolve（响应体不含 code），失败会 reject 进入 catch
               const res = await tokenStore.sendMessageWithPromise(
@@ -154,15 +200,6 @@ export function createTasksItem(deps) {
               );
               const newStar = Number(res?.role?.heroes?.[heroId]?.star);
               const newQty = Number(res?.role?.items?.[heroId]?.quantity);
-              // 用碎片减少量反推并记录该星级的升星消耗，供下次预检使用
-              if (
-                Number.isFinite(qtyBefore) &&
-                Number.isFinite(newQty) &&
-                newQty < qtyBefore &&
-                Number.isFinite(star)
-              ) {
-                heroStarCostMap[`${heroId}:${star}`] = qtyBefore - newQty;
-              }
               if (Number.isFinite(newStar)) star = newStar;
               if (Number.isFinite(newQty)) {
                 qty = newQty;
@@ -182,7 +219,7 @@ export function createTasksItem(deps) {
             upgradedHeroCount++;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 武将ID:${heroId} 升星 ${count} 次 (当前星级 ${star || "-"})${stopReason ? `，停止原因: ${stopReason}${stopPacketInfo ? ` [${stopPacketInfo}]` : ""}` : ""}`,
+              message: `${token.name} 武将:${heroName(heroId)}(ID${heroId}) 升星 ${count} 次 (当前星级 ${star || "-"})${stopReason ? `，停止原因: ${stopReason}${stopPacketInfo ? ` [${stopPacketInfo}]` : ""}` : ""}`,
               type: "success",
             });
           } else if (stopReason) {
@@ -196,7 +233,7 @@ export function createTasksItem(deps) {
               const st0 = initialRole?.heroes?.[heroId]?.star;
               const qty0 = initialRole?.items?.[heroId]?.quantity;
               entry.examples.push(
-                `${heroId}(星级${st0 ?? "?"},碎片${qty0 ?? "?"})`,
+                `${heroName(heroId)}(ID${heroId},星级${st0 ?? "?"},碎片${qty0 ?? "?"})`,
               );
             }
           }
@@ -209,13 +246,6 @@ export function createTasksItem(deps) {
             message: `${token.name} 未升星武将 ${entry.count} 个，原因: ${reason}${entry.packetInfo ? ` [${entry.packetInfo}]` : ""}${entry.examples.length ? `，示例: ${entry.examples.join("、")}` : ""}`,
             type: "warning",
           });
-        }
-
-        // 保存学习到的升星消耗，供下次预检使用
-        try {
-          localStorage.setItem(HERO_STAR_COST_KEY, JSON.stringify(heroStarCostMap));
-        } catch (e) {
-          // 忽略存储失败（隐私模式/容量不足）
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -281,6 +311,26 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
+        // 拉取角色信息：命中限流(200400 操作太快)时退避重试，避免整个账号任务被中断
+        const fetchRoleWithBackoff = async () => {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const info = await tokenStore.sendGetRoleInfo(tokenId);
+              return info?.role || info;
+            } catch (err) {
+              const msg = err?.message || String(err);
+              const isBusy = /200400|操作太快/.test(msg);
+              if (!isBusy || attempt === 1) throw err;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 拉取角色信息被限流(200400 操作太快)，4秒后重试`,
+                type: "warning",
+              });
+              await workerSleep(4000);
+            }
+          }
+        };
+
         let upgradedTotal = 0;
         // 已尝试失败的道具ID，后续轮次不再重复请求
         const fishFailed = new Set();
@@ -288,8 +338,17 @@ export function createTasksItem(deps) {
         for (let pass = 0; pass < FISH_PASS_MAX; pass++) {
           if (shouldStop.value) break;
 
-          const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-          const role = roleInfo?.role || roleInfo;
+          let role;
+          try {
+            role = await fetchRoleWithBackoff();
+          } catch (err) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 拉取角色信息失败，结束鱼升星: ${err.message}`,
+              type: "warning",
+            });
+            break;
+          }
 
           // 鱼ID前缀集合：artifactBooks 的 key 是 4 位鱼ID，道具ID 的前 4 位即鱼ID
           const fishIdSet = new Set();
@@ -310,8 +369,21 @@ export function createTasksItem(deps) {
             if (Number.isFinite(aid) && aid > 0) holderMap[aid] = Number(hid);
           }
 
+          // 同名鱼本体总数：按鱼ID前缀(前4位)跨星级合计，游戏升星是按同名鱼合计算本体数
+          const fishTotalQty = {};
+          for (const [key, item] of Object.entries(role?.items || {})) {
+            const rawId = Number(item?.itemId ?? key);
+            if (!Number.isFinite(rawId) || rawId <= 0) continue;
+            const qty = Number(item?.quantity ?? 0);
+            if (!Number.isFinite(qty) || qty <= 0) continue;
+            const prefix = String(rawId).substring(0, 4);
+            fishTotalQty[prefix] = (fishTotalQty[prefix] || 0) + qty;
+          }
+
           // 候选 = 实际持有的鱼/神器道具；itemId 升序 == 按鱼分组、星级从低到高
           const candidates = [];
+          // itemId -> 本体数量（用于日志展示）
+          const fishQty = {};
           for (const [key, item] of Object.entries(role?.items || {})) {
             const itemId = Number(item?.itemId ?? key);
             if (!Number.isFinite(itemId) || itemId <= 0) continue;
@@ -320,23 +392,59 @@ export function createTasksItem(deps) {
             if (!Number.isFinite(qty) || qty <= 0) continue;
             if (fishFailed.has(itemId)) continue;
             candidates.push(itemId);
+            fishQty[itemId] = qty;
           }
           candidates.sort((a, b) => a - b);
 
           if (pass === 0) {
+            const upgradable = candidates.filter((id) => {
+              const c = getFishStarCost(id);
+              if (!c) return true;
+              return (
+                Number(fishTotalQty[String(id).substring(0, 4)] ?? 0) >= c.cost
+              );
+            }).length;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 检测到持有的鱼/神器 ${candidates.length} 种 (图鉴鱼 ${fishIdSet.size} 种)`,
+              message: `${token.name} 检测到持有的鱼/神器 ${candidates.length} 种 (够本体可升星 ${upgradable} 种, 图鉴鱼 ${fishIdSet.size} 种)`,
               type: "info",
             });
           }
           if (candidates.length === 0) break;
 
           let passSuccess = 0;
+          // 本轮因限流被延后的道具数：>0 时不应提前结束，让其下一轮重试
+          let passDeferred = 0;
+          // 记录无法升星的道具（聚合同类原因，示例最多6条）
+          const recordFishFailure = (itemId, reason, packetInfo = "") => {
+            let entry = fishReasonStats.get(reason);
+            if (!entry) {
+              entry = { count: 0, examples: [], packetInfo };
+              fishReasonStats.set(reason, entry);
+            }
+            entry.count++;
+            if (entry.examples.length < 6)
+              entry.examples.push(
+                `${fishName(itemId)}(ID${itemId},本级${fishQty[itemId] ?? "?"}只,同鱼共${fishTotalQty[String(itemId).substring(0, 4)] ?? "?"}只)`,
+              );
+          };
           for (const itemId of candidates) {
             if (shouldStop.value) break;
 
             const heroId = holderMap[itemId] ?? -1;
+            // 品质预检：同名鱼本体合计不足时直接跳过，不调用服务器接口
+            const fishCost = getFishStarCost(itemId);
+            const totalNow = Number(
+              fishTotalQty[String(itemId).substring(0, 4)] ?? 0,
+            );
+            if (fishCost && totalNow < fishCost.cost) {
+              fishFailed.add(itemId);
+              recordFishFailure(
+                itemId,
+                `本体不足(${fishCost.name}需${fishCost.cost}只)`,
+              );
+              continue;
+            }
             try {
               await tokenStore.sendMessageWithPromise(
                 tokenId,
@@ -348,31 +456,36 @@ export function createTasksItem(deps) {
               upgradedTotal++;
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 鱼/神器 ID:${itemId} 升星成功`,
+                message: `${token.name} 鱼/神器 ${fishName(itemId)}(ID${itemId}) 升星成功`,
                 type: "success",
               });
             } catch (err) {
+              const reason = err?.message || String(err);
+              // 限流(200400 操作太快)是瞬时的：本轮跳过且不拉黑，下一轮会重新尝试
+              if (/200400|操作太快/.test(reason)) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 鱼/神器 ${fishName(itemId)}(ID${itemId}) 被限流(200400 操作太快)，延后重试`,
+                  type: "warning",
+                });
+                await workerSleep(3000);
+                passDeferred++;
+                continue;
+              }
               // 该道具本轮无法升星（材料不足/已满星等），记录原因并跳过
               fishFailed.add(itemId);
-              const reason = err?.message || String(err);
-              let entry = fishReasonStats.get(reason);
-              if (!entry) {
-                entry = { count: 0, examples: [], packetInfo: err?.packetInfo || "" };
-                fishReasonStats.set(reason, entry);
-              }
-              entry.count++;
-              if (entry.examples.length < 6) entry.examples.push(String(itemId));
+              recordFishFailure(itemId, reason, err?.packetInfo || "");
             }
             await workerSleep(delayConfig.action);
           }
 
-          if (passSuccess === 0) break;
+          if (passSuccess === 0 && passDeferred === 0) break;
         }
 
         for (const [reason, entry] of fishReasonStats) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 鱼/神器升星失败 ${entry.count} 种，原因: ${reason}${entry.packetInfo ? ` [${entry.packetInfo}]` : ""}${entry.examples.length ? `，示例ID: ${entry.examples.join("、")}` : ""}`,
+            message: `${token.name} 鱼/神器升星失败 ${entry.count} 种，原因: ${reason}${entry.packetInfo ? ` [${entry.packetInfo}]` : ""}${entry.examples.length ? `，示例: ${entry.examples.join("、")}` : ""}`,
             type: "warning",
           });
         }
@@ -460,7 +573,7 @@ export function createTasksItem(deps) {
           if (count > 0) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 英雄ID:${heroId} 图鉴升星 ${count} 次`,
+              message: `${token.name} 英雄:${heroName(heroId)}(ID${heroId}) 图鉴升星 ${count} 次`,
               type: "success",
             });
           }
