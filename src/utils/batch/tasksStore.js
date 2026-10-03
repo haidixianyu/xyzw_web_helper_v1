@@ -82,6 +82,41 @@ const formatJianghuReward = (resp) => {
     .join("、");
 };
 
+// 月度商店采购清单（统一走 legion_storebuygoods: {id, num}）
+// 依据 2026-10-03 实测抓包（log5.txt）：
+//   盐晶商店·斑点蛋   id 205，num 4 一次性购买 4 个
+//   助威商店·红色随机碎片 id 7，num 0 买 1 次得 100 片
+//   助威商店·白玉       id 8，num 0 买 1 次得 2000 个
+const MONTHLY_STORE_PURCHASES = [
+  { id: 205, num: 4, times: 1, name: "斑点蛋", itemId: 37011 },
+  { id: 7, num: 0, times: 1, name: "随机红将碎片", itemId: 3007 },
+  { id: 8, num: 0, times: 1, name: "白玉", itemId: 1022 },
+];
+
+// 月度商店奖励物品名（仅用于日志展示，未收录的回退显示原始 itemId）
+const MONTHLY_STORE_ITEM_NAMES = {
+  37011: "斑点蛋",
+  3007: "随机红将碎片",
+  1022: "白玉",
+};
+
+// 聚合响应 reward 里同 itemId 的数量，转成 "斑点蛋×2"
+const formatStoreReward = (resp) => {
+  const reward = resp?.reward;
+  if (!Array.isArray(reward) || reward.length === 0) return "";
+  const totals = {};
+  for (const { itemId, value } of reward) {
+    const key = Number(itemId);
+    totals[key] = (totals[key] || 0) + Number(value || 0);
+  }
+  return Object.entries(totals)
+    .map(
+      ([itemId, value]) =>
+        `${MONTHLY_STORE_ITEM_NAMES[itemId] || itemId}×${value}`,
+    )
+    .join("、");
+};
+
 // 服务端「已购买/超出限购」类错误统一按文案识别，避免依赖未收录的错误码
 const isAlreadyBoughtError = (text) =>
   /已购买|已领取|重复|上限|超出限制/.test(String(text || ""));
@@ -280,6 +315,116 @@ export function createTasksStore(deps) {
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 购买过程出错: ${error.message}`,
+          type: "error",
+        });
+        tokenStatus.value[tokenId] = "failed";
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
+  /**
+   * 月度商店购买
+   * 盐晶商店·斑点蛋×4 + 助威商店·随机红将碎片×100、白玉×2000
+   * 详见 MONTHLY_STORE_PURCHASES / log5.txt
+   */
+  const batchMonthlyStoreBuy = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始月度商店购买: ${token.name} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        let successCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+
+        for (const goods of MONTHLY_STORE_PURCHASES) {
+          for (let i = 0; i < goods.times; i++) {
+            if (shouldStop.value) break;
+
+            try {
+              const result = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "legion_storebuygoods",
+                { id: goods.id, num: goods.num },
+                5000,
+              );
+
+              successCount++;
+              const gainedText = formatStoreReward(result);
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${goods.name} 购买成功${
+                  gainedText ? `: ${gainedText}` : ""
+                }`,
+                type: "success",
+              });
+            } catch (error) {
+              const reason = error?.message || String(error);
+              if (isAlreadyBoughtError(reason)) {
+                skippedCount++;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${goods.name} 已达上限或已购买，跳过`,
+                  type: "info",
+                });
+              } else {
+                failedCount++;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${goods.name} 购买失败: ${reason}`,
+                  type: "error",
+                });
+              }
+            }
+
+            await workerSleep(delayConfig.action);
+          }
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 月度商店完成: 成功 ${successCount}，跳过 ${skippedCount}，失败 ${failedCount}`,
+          type: failedCount > 0 ? "warning" : "success",
+        });
+        tokenStatus.value[tokenId] = failedCount > 0 ? "failed" : "completed";
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 月度商店购买过程出错: ${error.message}`,
           type: "error",
         });
         tokenStatus.value[tokenId] = "failed";
@@ -791,6 +936,7 @@ export function createTasksStore(deps) {
 
   return {
     legion_storebuygoods,
+    batchMonthlyStoreBuy,
     legionStoreBuySkinCoins,
     store_purchase,
     store_syncpurchaseconfig,

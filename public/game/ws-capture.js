@@ -4,8 +4,9 @@
  * 用途: 记录游戏 rpc 的**明文请求 cmd + 输入参数**与**响应 cmd + code + 数据**,
  *       供在 v1 中复现/模拟功能, 以及排查「检测到您使用的客户端数据异常」等弹窗。
  *
- * 抓取点: 通过 trap window.__require, 扫描返回模块中找到 WebSocketClient 原型
- *   (特征: 同时具有 send / doReceive / sendHeartbeat 三个原型方法), 包一层记录:
+ * 抓取点: 包装 window.__require, 把返回的模块对象入队(启动期不扫描), 等首个场景启动后
+ *   再分批扫描, 找到 WebSocketClient 原型(特征: 同时具有 send / doReceive / sendHeartbeat
+ *   三个原型方法)后包一层记录:
  *     - send(e):  e = {cmd, params, ...}  → 记录 ">>" 请求(明文参数)
  *     - doReceive(e): e = {cmd, code, rawData(解码响应体)} → 记录 "<<" 响应
  *   心跳/ack 走 doSend 而非 send, 且 cmd 以 "_sys/" 开头, 这里统一过滤, 不占日志空间。
@@ -69,6 +70,10 @@
   var CAP = [];
   var MAX = 400;
   var AUTO_RE = /异常|客户端|封禁|illegal|forbidden/i;
+  // 启动完成前禁止自动导出: 启动期游戏会打大量含「客户端/异常」的日志, 若此时自动导出
+  // (JSON.stringify 数 MB + console.table + 剪贴板写入 + localStorage 落盘) 会把主线程卡死,
+  // 表现为「开了 WS 日志后游戏直接没反应」。
+  var allowAutoDump = false;
 
   // ============ 0.1) 连接健康诊断 ============
   // 盲点: 命令级 ">>" 是在引擎 send 包装层记录的, 不看 socket 的 readyState, 所以
@@ -132,9 +137,21 @@
     return typeof cmd === "string" && (cmd.indexOf("_sys/") === 0 || cmd === "heartbeat");
   }
 
-  // ============ 1) 命令级抓取: trap __require 找 WebSocketClient 原型 ============
+  // ============ 1) 命令级抓取: 包装 __require 收集模块, 启动完成后再扫描 ============
+  // 重要约束(2026-10-04 修复「开了 WS 日志后游戏完全没反应」):
+  //   启动期不能同步扫描模块 —— 对每个 require 同步 Object.keys + 读取导出属性, 会提前触发
+  //   大量懒初始化(执行顺序错乱), 直接把游戏启动卡死; 启动期调用 __require('net') 之类的
+  //   名称探测同理。改为: require 时仅把模块对象入队(O(1) push, 不读任何属性), 等首个
+  //   场景真正启动后再分批扫描, 找到 WebSocketClient 原型一次即可(登录/战斗握手前完成)。
   var protoPatched = false;
   var instSendPatched = 0;
+  var moduleQueue = [];
+  var MAX_QUEUE = 20000;
+  function enqueueModule(mod) {
+    if (protoPatched || !mod || typeof mod !== "object") return;
+    if (moduleQueue.length >= MAX_QUEUE) return;
+    moduleQueue.push(mod);
+  }
   function looksLikeWsClientProto(p) {
     try {
       return (
@@ -321,11 +338,22 @@
       }
     }
   }
-  // trap window.__require(游戏 bundle 在后续脚本里赋值), 每次返回模块都扫描
+  // 分批扫描队列(仅在启动完成后调用), 命中即停
+  function drainQueue(batch) {
+    if (protoPatched) return true;
+    var n = 0;
+    while (moduleQueue.length && n < batch) {
+      scanModule(moduleQueue.shift());
+      n++;
+      if (protoPatched) break;
+    }
+    return protoPatched;
+  }
+  // 包装 window.__require(游戏 bundle 在后续脚本里赋值), 只入队不扫描
   function installRequireTrap() {
     var real = window.__require;
     if (typeof real === "function") {
-      // 已存在: 直接扫一次 + 包一层
+      // 已存在: 包一层(注: 若游戏已跑起来, 直接包一层即可, 队列由 drainQueue 处理)
       wrapExisting(real);
       return;
     }
@@ -349,7 +377,7 @@
       var wrapped = function (name) {
         var mod = fn.apply(this, arguments);
         try {
-          scanModule(mod);
+          enqueueModule(mod);
         } catch (e) {}
         return mod;
       };
@@ -358,8 +386,7 @@
       try {
         window.__require = wrapped;
       } catch (e) {}
-      // 兜底: 主动扫描已加载模块的常见名字
-      probeKnownNames();
+      // 注意: 这里不能同步扫描或探测模块名(会破坏启动时序), 统一交给启动后的 drainQueue
     } catch (e) {}
   }
   function probeKnownNames() {
@@ -375,13 +402,53 @@
     }
   }
   installRequireTrap();
-  // 游戏可能延迟 require, 轮询探测直到挂钩成功或超时
-  var tries = 0;
-  var iv = setInterval(function () {
-    tries++;
-    probeKnownNames();
-    if (protoPatched || tries > 60) clearInterval(iv);
-  }, 500);
+
+  // 启动期只收集不扫描。等首个场景真正跑起来(cc.director.getScene() 非空)后, 再分批扫描队列;
+  // 队列排空仍未命中时, 才用常见模块名兜底探测(此时启动已完成, 调用 __require 才是安全的)。
+  var hookingStarted = false;
+  function startHooking() {
+    if (hookingStarted) return;
+    hookingStarted = true;
+    allowAutoDump = true; // 启动完成, 允许自动导出
+    var ticks = 0;
+    var iv = setInterval(function () {
+      ticks++;
+      if (drainQueue(200)) {
+        clearInterval(iv);
+        moduleQueue.length = 0;
+        return;
+      }
+      // 队列已排空: 每 ~3s 用常见模块名兜底探测一次
+      if (!moduleQueue.length && ticks % 20 === 0) {
+        probeKnownNames();
+        if (protoPatched) clearInterval(iv);
+      }
+    }, 150);
+    // 兜底上限: 5 分钟后停止轮询, 避免长驻定时器
+    setTimeout(function () {
+      clearInterval(iv);
+    }, 300000);
+  }
+  (function waitFirstScene() {
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      var ready = false;
+      try {
+        ready = !!(
+          window.cc &&
+          cc.director &&
+          typeof cc.director.getScene === "function" &&
+          cc.director.getScene()
+        );
+      } catch (e) {}
+      // getScene() 非空 = 首个场景已 launch; 90s 超时兜底(极端情况下也要尝试挂钩)
+      if (ready || tries > 300) {
+        clearInterval(iv);
+        startHooking();
+      }
+    }, 300);
+  })();
 
   // ============ 2) 连接 URL + 控制台 error/warn ============
   var NativeWS = window.WebSocket;
@@ -493,6 +560,7 @@
   }
 
   function scheduleAutoDump() {
+    if (!allowAutoDump) return; // 启动期不自动导出(见 allowAutoDump 说明)
     if (scheduleAutoDump.timer) return;
     scheduleAutoDump.timer = setTimeout(function () {
       scheduleAutoDump.timer = null;

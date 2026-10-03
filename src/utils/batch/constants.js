@@ -73,6 +73,7 @@ export const availableTasks = [
   { label: "玄武赐福连续抽奖", value: "batchXuanwuLottery" },
   { label: "玄武赐福单次抽奖", value: "batchXuanwuSingleLottery" },
   { label: "比赛预约", value: "batchPkRoomAppoint" },
+  { label: "月度商店购买", value: "batchMonthlyStoreBuy" },
 ];
 
 // 黑市周活动商店（统一走 activity_buystoregoods: {activityId, goodsIndex, buyNum}）

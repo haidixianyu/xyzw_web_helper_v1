@@ -366,8 +366,10 @@ window.parseRemoteBundleVers = function (settingsObj) {
 }
 
 window.loadRemoteBundleVers = async function () {
-  // manifest 仅接受 android 通道值(实测其他 version 返回无 bundleVers), 与 GAME_VERSION 解耦
-  const version = '0.32.0-android'
+  // 与 GAME_VERSION 同源(口径统一): 线上 manifest 只有 0.32.0-android 返回 isLast=true + 完整
+  // bundleVers; 其他版本号会导致 isLast 缺失(游戏内「版本异常」弹窗)或 bundleVers 缺失(启动即失败)。
+  const version =
+    (typeof window !== 'undefined' && window.GAME_VERSION) || '0.32.0-android'
   const manifestUrl = `https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=${encodeURIComponent(version)}`
   console.log('[remoteAssets] POST manifest', manifestUrl)
 

@@ -1266,6 +1266,20 @@
                 >
                   月赛助威
                 </n-button>
+                <n-tooltip placement="top" style="max-width: 420px;">
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      @click="batchMonthlyStoreBuy"
+                      :disabled="isRunning || selectedTokens.length === 0"
+                    >
+                      月度商店购买
+                    </n-button>
+                  </template>
+                  <div style="white-space: pre-line;">
+                    {{ monthlyStoreTooltip }}
+                  </div>
+                </n-tooltip>
               </n-space>
             </n-tab-pane>
           </n-tabs>
@@ -5866,7 +5880,7 @@ const taskGroupDefinitions = [
   {
     name: "monthly",
     label: "月度",
-    tasks: ["batchTopUpFish", "batchTopUpArena"],
+    tasks: ["batchTopUpFish", "batchTopUpArena", "batchMonthlyStoreBuy"],
   },
 ];
 
@@ -9029,6 +9043,7 @@ const { batcharenafight, batchTopUpFish, batchTopUpArena } = tasksArena;
 const tasksStore = createTasksStore(createTaskDeps());
 const {
   legion_storebuygoods,
+  batchMonthlyStoreBuy,
   legionStoreBuySkinCoins,
   store_purchase,
   store_syncpurchaseconfig,
@@ -9053,6 +9068,14 @@ const blackMarketTooltip = computed(() =>
     `合计消耗 ${blackMarketWeekTotalPrice} 金砖（已购买的不再扣除）`,
   ].join("\n"),
 );
+
+// 「月度商店购买」悬浮提示：购买内容
+const monthlyStoreTooltip = [
+  "月度商店购买清单：",
+  "· 盐晶商店-斑点蛋 ×4",
+  "· 助威商店-随机红将碎片 ×100",
+  "· 助威商店-白玉 ×2000",
+].join("\n");
 
 const tasksLegacy = createTasksLegacy(createTaskDeps());
 const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;
