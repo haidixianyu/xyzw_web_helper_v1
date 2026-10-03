@@ -817,17 +817,22 @@
                 >
                   一键怪异塔合成
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimFreeEnergy"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键领取怪异塔免费道具
-                </n-button>
+                <n-tooltip placement="top" style="max-width: 320px;">
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      @click="batchClaimWeirdTowerAll"
+                      :disabled="
+                        isRunning ||
+                        selectedTokens.length === 0 ||
+                        !isWeirdTowerActivityOpen
+                      "
+                    >
+                      一键领取
+                    </n-button>
+                  </template>
+                  依次领取怪异塔奖励：① 俱乐部特权 ② 俱乐部任务奖励 ③ 爬塔之路 ④ 累计消耗奖励（钥匙） ⑤ 怪异寻宝免费钥匙（原“一键领取怪异塔免费道具”） ⑥ 合成等级奖励
+                </n-tooltip>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="daily" tab="日常">
@@ -1144,6 +1149,20 @@
                 >
                   一键购买俱乐部5皮肤币
                 </n-button>
+                <n-tooltip placement="top" style="max-width: 420px;">
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      @click="batchBuyJianghuBlackMarket"
+                      :disabled="isRunning || selectedTokens.length === 0"
+                    >
+                      一键黑市周购买
+                    </n-button>
+                  </template>
+                  <div style="white-space: pre-line;">
+                    {{ blackMarketTooltip }}
+                  </div>
+                </n-tooltip>
                 <n-button
                   size="small"
                   :loading="fishClaimLoading"
@@ -3722,6 +3741,8 @@ import {
   CarresearchItem,
   FISH_TARGET,
   ARENA_TARGET,
+  blackMarketWeekShops,
+  blackMarketWeekTotalPrice,
   taskColumns,
   defaultSettings,
   defaultBatchSettings,
@@ -5821,7 +5842,7 @@ const taskGroupDefinitions = [
       "climbWeirdTower",
       "batchUseItems",
       "batchMergeItems",
-      "batchClaimFreeEnergy",
+      "batchClaimWeirdTowerAll",
     ],
   },
   {
@@ -5834,6 +5855,7 @@ const taskGroupDefinitions = [
       "batchFish",
       "batchRecruit",
       "legion_storebuygoods",
+      "batchBuyJianghuBlackMarket",
     ],
   },
   {
@@ -6883,7 +6905,7 @@ const executeScheduledTask = async (task) => {
           "climbWeirdTower",
           "batchUseItems",
           "batchMergeItems",
-          "batchClaimFreeEnergy",
+          "batchClaimWeirdTowerAll",
         ].includes(taskName) &&
         !isWeirdTowerActivityOpen.value
       ) {
@@ -8972,7 +8994,7 @@ const tasksTower = createTasksTower(createTaskDeps());
 const {
   climbTower,
   climbWeirdTower,
-  batchClaimFreeEnergy,
+  batchClaimWeirdTowerAll,
   skinChallenge,
   claimSkinChallengeRewards,
   batchUseItems,
@@ -9012,7 +9034,25 @@ const {
   store_syncpurchaseconfig,
   readBlackMarketPurchaseConfig,
   collection_claimfreereward,
+  batchBuyJianghuBlackMarket,
 } = tasksStore;
+
+// 「一键黑市周购买」悬浮提示：购买内容 + 金额
+const blackMarketTooltip = computed(() =>
+  [
+    "黑市周购买清单（每周限购 1 次，已购买自动跳过）：",
+    ...blackMarketWeekShops.flatMap((shop) => [
+      `【${shop.shopName}】`,
+      ...shop.goods.map(
+        (goods) =>
+          `· ${goods.name} ${
+            goods.price > 0 ? `${goods.price} 金砖` : "免费领取"
+          } → ${goods.rewardText}`,
+      ),
+    ]),
+    `合计消耗 ${blackMarketWeekTotalPrice} 金砖（已购买的不再扣除）`,
+  ].join("\n"),
+);
 
 const tasksLegacy = createTasksLegacy(createTaskDeps());
 const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;

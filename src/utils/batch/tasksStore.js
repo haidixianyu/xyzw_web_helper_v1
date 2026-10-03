@@ -4,12 +4,87 @@ import {
   normalizeBlackMarketPurchaseList,
   toStorePurchaseItemList,
 } from "./blackMarketConfig";
+import { blackMarketWeekShops } from "./constants";
+
+// 本地已购记录（服务端 record 里 goodsId 与 goodsIndex 的对应关系尚未确认时的兜底）
+const BLACK_MARKET_LEDGER_KEY = "black_market_week_bought_v1";
+
+// 本周标识（以周一为起点），按周隔离已购记录
+const getWeekKey = () => {
+  const now = new Date();
+  const offset = (now.getDay() + 6) % 7;
+  const monday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - offset,
+  );
+  return `${monday.getFullYear()}${String(monday.getMonth() + 1).padStart(2, "0")}${String(
+    monday.getDate(),
+  ).padStart(2, "0")}`;
+};
+
+const readBoughtLedger = (tokenId, weekKey) => {
+  try {
+    const all = JSON.parse(localStorage.getItem(BLACK_MARKET_LEDGER_KEY) || "{}");
+    return new Set(all?.[tokenId]?.[weekKey] || []);
+  } catch {
+    return new Set();
+  }
+};
+
+const writeBoughtLedger = (tokenId, weekKey, indexes) => {
+  try {
+    const all = JSON.parse(localStorage.getItem(BLACK_MARKET_LEDGER_KEY) || "{}");
+    all[tokenId] = { [weekKey]: indexes };
+    localStorage.setItem(BLACK_MARKET_LEDGER_KEY, JSON.stringify(all));
+  } catch {
+    // 本地记录写入失败不影响购买
+  }
+};
+
+// activity_get 响应解包（promise 可能 resolve 成 body 或整个报文）
+const unwrapActivityResp = (resp) => resp?.body ?? resp;
+
+// 已购状态：activity.myStoreInfo[activityId].complete 以 goodsIndex 为键，值为 1 即本周已购买
+// 例: {"0":1,"1":1,"2":1,"4":1,"6":1}
+const getShopCompleteMap = (resp, activityId) =>
+  unwrapActivityResp(resp)?.activity?.myStoreInfo?.[activityId]?.complete || null;
 
 /**
  * 商店类任务
  * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase,
- * store_syncpurchaseconfig, collection_claimfreereward
+ * store_syncpurchaseconfig, collection_claimfreereward, batchBuyJianghuBlackMarket
  */
+
+// 江湖黑市奖励物品名（仅用于日志展示，未收录的回退显示原始 itemId）
+const JIANGHU_ITEM_NAMES = {
+  2: "金砖",
+  1001: "招募令",
+  1003: "进阶石",
+  1006: "精铁",
+  1011: "普通鱼竿",
+  1012: "黄金鱼竿",
+  2001: "木质宝箱",
+  2002: "青铜宝箱",
+  2003: "黄金宝箱",
+  2004: "铂金宝箱",
+};
+
+// syncrewardresp 的 reward 字段转成 "招募令×5、精铁×1000"
+const formatJianghuReward = (resp) => {
+  const reward = resp?.reward;
+  if (!Array.isArray(reward) || reward.length === 0) return "";
+  return reward
+    .map(
+      ({ itemId, value }) =>
+        `${JIANGHU_ITEM_NAMES[Number(itemId)] || itemId}×${value}`,
+    )
+    .join("、");
+};
+
+// 服务端「已购买/超出限购」类错误统一按文案识别，避免依赖未收录的错误码
+const isAlreadyBoughtError = (text) =>
+  /已购买|已领取|重复|上限|超出限制/.test(String(text || ""));
 
 /**
  * 创建商店类任务执行器
@@ -548,6 +623,172 @@ export function createTasksStore(deps) {
     shouldStop.value = false;
   };
 
+  /**
+   * 一键黑市周购买（金砖商店的金砖回馈 + 江湖黑市商品，price=0 即免费领取）
+   * 清单见 constants.js 的 blackMarketWeekShops
+   * 购买前依次用「服务端购买记录 → 本地已购记录」判断，命中则跳过；
+   * 两者都判不出时按服务端错误（已购买/超出上限）兜底，避免重复扣金砖
+   */
+  const batchBuyJianghuBlackMarket = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始黑市周购买: ${token.name} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        // 1. 登录时的 activity_get 就带着活动商店购买记录，先取一份用于判断是否已购
+        const weekKey = getWeekKey();
+        const ledger = readBoughtLedger(tokenId, weekKey);
+
+        let activityResp = null;
+        try {
+          activityResp = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_get",
+            {},
+            10000,
+          );
+        } catch (error) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} activity_get 失败: ${error.message}（改用本地记录判定）`,
+            type: "warning",
+          });
+        }
+
+        // 2. 逐个商店购买（已购跳过）
+        let boughtCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+
+        for (const shop of blackMarketWeekShops) {
+          if (shouldStop.value) break;
+
+          const completeMap = getShopCompleteMap(activityResp, shop.activityId);
+          const skippedNames = [];
+
+          for (const goods of shop.goods) {
+            if (shouldStop.value) break;
+
+            // 本地记录以「活动ID:商品下标」为键，避免两个商店的下标互相干扰
+            const ledgerKey = `${shop.activityId}:${goods.goodsIndex}`;
+            const serverBought = Number(completeMap?.[goods.goodsIndex]) > 0;
+
+            if (serverBought || ledger.has(ledgerKey)) {
+              skippedCount++;
+              skippedNames.push(goods.name);
+              if (!ledger.has(ledgerKey)) {
+                ledger.add(ledgerKey);
+                writeBoughtLedger(tokenId, weekKey, [...ledger]);
+              }
+              continue;
+            }
+
+            const actionText = goods.price > 0 ? "购买" : "领取";
+
+            try {
+              const resp = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_buystoregoods",
+                {
+                  activityId: shop.activityId,
+                  goodsIndex: goods.goodsIndex,
+                  buyNum: 1,
+                },
+                10000,
+              );
+
+              boughtCount++;
+              ledger.add(ledgerKey);
+              writeBoughtLedger(tokenId, weekKey, [...ledger]);
+              const gainedText = formatJianghuReward(resp);
+
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${shop.shopName}-${goods.name} ${actionText}成功${
+                  gainedText ? `: ${gainedText}` : ""
+                }`,
+                type: "success",
+              });
+            } catch (error) {
+              const reason = error?.message || String(error);
+              if (isAlreadyBoughtError(reason)) {
+                skippedCount++;
+                skippedNames.push(goods.name);
+                ledger.add(ledgerKey);
+                writeBoughtLedger(tokenId, weekKey, [...ledger]);
+              } else {
+                failedCount++;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${shop.shopName}-${goods.name} ${actionText}失败: ${reason}`,
+                  type: "error",
+                });
+              }
+            }
+
+            await workerSleep(delayConfig.action);
+          }
+
+          if (skippedNames.length > 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} ${shop.shopName} 已购买跳过: ${skippedNames.join("、")}`,
+              type: "info",
+            });
+          }
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 黑市周完成: 成功 ${boughtCount}，已购跳过 ${skippedCount}，失败 ${failedCount}`,
+          type: failedCount > 0 ? "warning" : "success",
+        });
+        tokenStatus.value[tokenId] = failedCount > 0 ? "failed" : "completed";
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 黑市周购买过程出错: ${error.message}`,
+          type: "error",
+        });
+        tokenStatus.value[tokenId] = "failed";
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
   return {
     legion_storebuygoods,
     legionStoreBuySkinCoins,
@@ -555,5 +796,6 @@ export function createTasksStore(deps) {
     store_syncpurchaseconfig,
     readBlackMarketPurchaseConfig,
     collection_claimfreereward,
+    batchBuyJianghuBlackMarket,
   };
 }

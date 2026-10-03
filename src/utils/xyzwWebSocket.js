@@ -278,6 +278,9 @@ export function registerDefaultCommands(reg) {
     .register("mergebox_claimcostprogress", { actType: 1 })
     .register("mergebox_claimmergeprogress", { actType: 1 })
     .register("evotower_claimtask", { taskId: 1 })
+    // 怪异塔一键领取: 俱乐部特权 / 俱乐部任务奖励
+    .register("evotower_claimlegionprivilege")
+    .register("evotower_claimlegiontask", { taskId: 1 })
 
     // 瓶子机器人
     .register("bottlehelper_claim")
@@ -363,6 +366,10 @@ export function registerDefaultCommands(reg) {
     .register("activity_claimsignreward")
     .register("activity_claimtaskreward")
     .register("activity_commonbuygoods")
+    // 活动商店购买/领取（黑市周江湖黑市等，params: {activityId, goodsIndex, buyNum}）
+    .register("activity_buystoregoods")
+    // 怪异塔「爬塔之路」战令奖励 (battlePassId 固定为 1003)
+    .register("activity_battlepassrewardclaim", { battlePassId: 1003 })
     .register("legion_getpayloadtask")
     .register("legion_getpayloadkillrecord")
     .register("legion_getpayloadbf")
@@ -1205,7 +1212,8 @@ export class XyzwWebSocketClient {
       mergebox_mergeitemresp: "mergebox_mergeitem",
       mergebox_claimcostprogressresp: "mergebox_claimcostprogress",
       mergebox_claimmergeprogressresp: "mergebox_claimmergeprogress",
-      evotower_claimtaskresp: "evotower_claimtask",
+      evotower_claimtaskresp: ["evotower_claimtask", "evotower_claimlegiontask"],
+      evotower_claimlegionprivilegeresp: "evotower_claimlegionprivilege",
       item_openpackresp: "item_openpack",
       equipment_quenchresp: "equipment_quench",
       rank_getserverrankresp: "rank_getserverrank",
@@ -1272,6 +1280,7 @@ export class XyzwWebSocketClient {
       activity_lotteryresp: "activity_lottery",
       activity_claimlotterycumulativeresp: "activity_claimlotterycumulative",
       activity_rewardresp: ["activity_claimsignreward", "activity_claimtaskreward"],
+      activity_battlepassrewardclaimresp: "activity_battlepassrewardclaim",
       arena_getarearankresp: "arena_getarearank",
       bosstower_gethelprankresp: "bosstower_gethelprank",
       // 功法相关响应映射
@@ -1311,6 +1320,7 @@ export class XyzwWebSocketClient {
       syncrewardresp: [
         "hero_heroupgradestar",
         "activity_commonbuygoods",
+        "activity_buystoregoods",
         "system_buygold",
         "discount_claimreward",
         "card_claimreward",

@@ -3,7 +3,7 @@ import { workerSleep } from "../workerTimer.js";
 
 /**
  * 爬塔类任务
- * 包含: climbTower, climbWeirdTower, batchClaimFreeEnergy
+ * 包含: climbTower, climbWeirdTower, batchClaimWeirdTowerAll
  */
 import { normalizeWeirdTowerMaxClimb } from "../towerClimbLimit.js";
 
@@ -608,9 +608,202 @@ export function createTasksTower(deps) {
   };
 
   /**
-   * 领取怪异塔免费道具
+   * 怪异塔「爬塔之路」战令固定 ID
+   * 游戏侧 BattlePassBaseConf 中怪异塔战令活动 id 恒为 1003
    */
-  const batchClaimFreeEnergy = async () => {
+  const WEIRD_TOWER_BATTLE_PASS_ID = 1003;
+
+  /**
+   * 一键领取子步骤：俱乐部特权
+   * 命令无参数，服务端每次只发放一档，响应 evoTower.legionPrivilege 为本次新增档位；
+   * 故循环调用直到本次无新增档位或服务端拒绝。
+   */
+  const claimEvoTowerClubPrivilege = async (tokenId, log) => {
+    const MAX_ROUNDS = 20;
+    const seen = new Set();
+    let count = 0;
+
+    for (let i = 0; i < MAX_ROUNDS && !shouldStop.value; i++) {
+      try {
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_claimlegionprivilege",
+          {},
+          5000,
+        );
+        const delta = res?.evoTower?.legionPrivilege || {};
+        const newKeys = Object.keys(delta).filter((k) => !seen.has(k));
+        if (newKeys.length === 0) break;
+        newKeys.forEach((k) => seen.add(k));
+        count += newKeys.length;
+        log(`俱乐部特权领取成功（第 ${newKeys.join("/")} 档）`, "success");
+        await workerSleep(300);
+      } catch (e) {
+        // 全部档位领完时服务端会拒绝，视为结束
+        break;
+      }
+    }
+
+    if (count === 0) log("俱乐部特权暂无可领取档位", "info");
+    return count;
+  };
+
+  /**
+   * 一键领取子步骤：俱乐部任务奖励
+   * 依据 evotower_getinfo 的 legionTaskMap(进度) 与 legionTaskClaimMap(已领)，
+   * 逐个尝试领取未领取任务；未达标的任务会被服务端拒绝，跳过即可。
+   */
+  const claimEvoTowerClubTasks = async (tokenId, evoTower, log) => {
+    const taskMap = evoTower?.legionTaskMap || {};
+    const claimedMap = evoTower?.legionTaskClaimMap || {};
+    let claimed = 0;
+    let rejected = 0;
+
+    for (const taskId of Object.keys(taskMap)) {
+      if (shouldStop.value) break;
+      if (claimedMap[taskId]) continue;
+      if (!(taskMap[taskId] > 0)) continue;
+
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_claimlegiontask",
+          { taskId: Number(taskId) },
+          5000,
+        );
+        claimed++;
+        log(`俱乐部任务 ${taskId} 奖励领取成功`, "success");
+        await workerSleep(300);
+      } catch (e) {
+        rejected++;
+      }
+    }
+
+    if (claimed === 0) {
+      log(
+        rejected > 0
+          ? `俱乐部任务暂无可领取奖励（${rejected} 个未达标）`
+          : "俱乐部任务暂无可领取奖励",
+        "info",
+      );
+    }
+    return claimed;
+  };
+
+  /**
+   * 一键领取子步骤：爬塔之路战令奖励
+   * 服务端一次会发放所有可领节点，重复调用直到无奖励返回。
+   */
+  const claimEvoTowerBattlePass = async (tokenId, log) => {
+    const MAX_ROUNDS = 10;
+    let count = 0;
+
+    for (let i = 0; i < MAX_ROUNDS && !shouldStop.value; i++) {
+      try {
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_battlepassrewardclaim",
+          { battlePassId: WEIRD_TOWER_BATTLE_PASS_ID },
+          5000,
+        );
+        const reward = res?.reward;
+        if (!Array.isArray(reward) || reward.length === 0) break;
+        count += reward.length;
+        log(`爬塔之路奖励领取成功（${reward.length} 项）`, "success");
+        await workerSleep(300);
+      } catch (e) {
+        break;
+      }
+    }
+
+    if (count === 0) log("爬塔之路暂无可领取奖励", "info");
+    return count;
+  };
+
+  /**
+   * 一键领取子步骤：怪异寻宝累计消耗奖励（钥匙）
+   * costTotalCnt > costClaimCnt 时领取，服务端一次补发所有已达档位的钥匙。
+   */
+  const claimEvoTowerCostProgress = async (tokenId, mergeBox, log) => {
+    const total = mergeBox?.costTotalCnt || 0;
+    const claimed = mergeBox?.costClaimCnt || 0;
+
+    if (total <= claimed) {
+      log("累计消耗奖励暂无可领取档位", "info");
+      return 0;
+    }
+
+    const res = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "mergebox_claimcostprogress",
+      { actType: 1 },
+      5000,
+    );
+    const count = Array.isArray(res?.reward) ? res.reward.length : 0;
+    log(`累计消耗奖励领取成功（${count} 项）`, "success");
+    return count;
+  };
+
+  /**
+   * 一键领取子步骤：怪异寻宝免费钥匙
+   * mergebox freeEnergy > 0 时领取，即原「一键领取怪异塔免费道具」逻辑。
+   */
+  const claimEvoTowerFreeEnergy = async (tokenId, mergeBox, log) => {
+    const freeEnergy = mergeBox?.freeEnergy || 0;
+
+    if (freeEnergy <= 0) {
+      log("怪异寻宝暂无可领取的免费钥匙", "info");
+      return 0;
+    }
+
+    await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "mergebox_claimfreeenergy",
+      { actType: 1 },
+      5000,
+    );
+    log(`怪异寻宝免费钥匙领取成功（${freeEnergy} 个）`, "success");
+    return freeEnergy;
+  };
+
+  /**
+   * 一键领取子步骤：怪异寻宝合成等级奖励
+   * 依据 taskMap(进度) 与 taskClaimMap(已领) 逐个领取未领取的合成档位。
+   */
+  const claimEvoTowerMergeProgress = async (tokenId, mergeBox, log) => {
+    const taskMap = mergeBox?.taskMap || {};
+    const taskClaimMap = mergeBox?.taskClaimMap || {};
+    let claimed = 0;
+
+    for (const taskId of Object.keys(taskMap)) {
+      if (shouldStop.value) break;
+      if (taskMap[taskId] === 0 || taskClaimMap[taskId]) continue;
+
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "mergebox_claimmergeprogress",
+          { actType: 1, taskId: parseInt(taskId) },
+          5000,
+        );
+        claimed++;
+        log(`合成等级奖励领取成功（${String(taskId).slice(-2)} 级）`, "success");
+        await workerSleep(300);
+      } catch (e) {
+        // 未达标或已领取，跳过
+      }
+    }
+
+    if (claimed === 0) log("合成等级奖励暂无可领取档位", "info");
+    return claimed;
+  };
+
+  /**
+   * 一键领取怪异塔奖励
+   * 依次领取: 俱乐部特权 -> 俱乐部任务奖励 -> 爬塔之路 -> 累计消耗奖励
+   *          -> 怪异寻宝免费钥匙 -> 合成等级奖励
+   */
+  const batchClaimWeirdTowerAll = async () => {
     if (selectedTokens.value.length === 0) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -624,63 +817,55 @@ export function createTasksTower(deps) {
       tokenStatus.value[tokenId] = "running";
 
       const token = tokens.value.find((t) => t.id === tokenId);
+      const name = token?.name || tokenId;
+      const log = (msg, type = "info") =>
+        addLog({ time: new Date().toLocaleTimeString(), message: `${name} ${msg}`, type });
+
       try {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== 开始领取怪异塔免费道具: ${token.name} ===`,
-          type: "info",
-        });
+        log("=== 开始一键领取怪异塔奖励 ===");
 
         await ensureConnection(tokenId);
 
-        const freeEnergyResult = await tokenStore.sendMessageWithPromise(
+        const evoTowerInfo = await tokenStore.sendMessageWithPromise(
           tokenId,
-          "mergebox_getinfo",
-          {
-            actType: 1,
-          },
+          "evotower_getinfo",
+          {},
           5000,
         );
 
-        if (freeEnergyResult && freeEnergyResult.mergeBox.freeEnergy > 0) {
-          await tokenStore.sendMessageWithPromise(
+        await claimEvoTowerClubPrivilege(tokenId, log);
+        await claimEvoTowerClubTasks(tokenId, evoTowerInfo?.evoTower, log);
+        await claimEvoTowerBattlePass(tokenId, log);
+
+        let mergeBox = null;
+        try {
+          const mergeBoxInfo = await tokenStore.sendMessageWithPromise(
             tokenId,
-            "mergebox_claimfreeenergy",
-            {
-              actType: 1,
-            },
+            "mergebox_getinfo",
+            { actType: 1 },
             5000,
           );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} 成功领取免费道具${freeEnergyResult.mergeBox.freeEnergy}个`,
-            type: "success",
-          });
-        } else {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `===  ${token.name} 暂无免费道具可领取`,
-            type: "success",
-          });
+          mergeBox = mergeBoxInfo?.mergeBox;
+        } catch (e) {
+          log(`读取怪异寻宝数据失败，跳过寻宝相关领取: ${e?.message || "未知错误"}`, "warning");
+        }
+
+        if (mergeBox) {
+          await claimEvoTowerCostProgress(tokenId, mergeBox, log);
+          await claimEvoTowerFreeEnergy(tokenId, mergeBox, log);
+          await claimEvoTowerMergeProgress(tokenId, mergeBox, log);
         }
 
         tokenStatus.value[tokenId] = "completed";
+        log("=== 一键领取怪异塔奖励完成 ===", "success");
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 领取免费道具失败: ${error.message || "未知错误"}`,
-          type: "error",
-        });
+        log(`一键领取怪异塔奖励失败: ${error?.message || "未知错误"}`, "error");
       } finally {
         tokenStore.closeWebSocketConnection(tokenId);
         releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
+        log(`连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`, "info");
       }
     });
 
@@ -688,7 +873,7 @@ export function createTasksTower(deps) {
 
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量领取怪异塔免费道具结束");
+    message.success("批量领取怪异塔奖励结束");
   };
 
   /**
@@ -1407,7 +1592,7 @@ export function createTasksTower(deps) {
   return {
     climbTower,
     climbWeirdTower,
-    batchClaimFreeEnergy,
+    batchClaimWeirdTowerAll,
     skinChallenge,
     claimSkinChallengeRewards,
     batchUseItems,

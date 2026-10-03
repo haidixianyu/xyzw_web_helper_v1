@@ -55,11 +55,12 @@ export const availableTasks = [
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
-  { label: "一键领取怪异塔免费道具", value: "batchClaimFreeEnergy" },
+  { label: "一键领取怪异塔奖励", value: "batchClaimWeirdTowerAll" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
   { label: "一键配置黑市采购清单", value: "store_syncpurchaseconfig" },
   { label: "一键黑市采购", value: "store_purchase" },
+  { label: "一键黑市周购买", value: "batchBuyJianghuBlackMarket" },
   { label: "免费领取珍宝阁", value: "collection_claimfreereward" },
   { label: "批量领取功法残卷", value: "batchLegacyClaim" },
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
@@ -73,6 +74,55 @@ export const availableTasks = [
   { label: "玄武赐福单次抽奖", value: "batchXuanwuSingleLottery" },
   { label: "比赛预约", value: "batchPkRoomAppoint" },
 ];
+
+// 黑市周活动商店（统一走 activity_buystoregoods: {activityId, goodsIndex, buyNum}）
+// goodsIndex = 活动商店 goodsList 下标；price = 单价（金砖），0 表示免费领取
+// 已购状态由 activity_get 判定：activity.myStoreInfo[activityId].complete 以 goodsIndex 为键，
+// 值为 1 即本周已购买（如黑市 {"0":1,"1":1,"2":1,"4":1,"6":1}）；
+// 取不到时回退本地已购记录 + 服务端错误
+// rewardText 用于按钮悬浮提示，文案与游戏内界面一致
+export const blackMarketWeekShops = [
+  {
+    activityId: 5,
+    shopName: "金砖商店",
+    goods: [{ goodsIndex: 0, name: "金砖回馈", price: 0, rewardText: "金砖×200" }],
+  },
+  {
+    activityId: 9,
+    shopName: "江湖黑市",
+    goods: [
+      { goodsIndex: 0, name: "黑市福利", price: 0, rewardText: "金砖×500" },
+      {
+        goodsIndex: 1,
+        name: "黑市见面礼",
+        price: 600,
+        rewardText: "招募令×5、精铁×1000",
+      },
+      {
+        goodsIndex: 2,
+        name: "黑市惊喜礼",
+        price: 1200,
+        rewardText: "招募令×10、进阶石×2000",
+      },
+      {
+        goodsIndex: 4,
+        name: "中级黑市包",
+        price: 5000,
+        rewardText: "木质/青铜/黄金/铂金宝箱各×10",
+      },
+      {
+        goodsIndex: 6,
+        name: "顶级鱼竿包",
+        price: 12000,
+        rewardText: "普通鱼竿×30、黄金鱼竿×30",
+      },
+    ],
+  },
+];
+export const blackMarketWeekTotalPrice = blackMarketWeekShops.reduce(
+  (sum, shop) => sum + shop.goods.reduce((sub, goods) => sub + goods.price, 0),
+  0,
+);
 
 // 车辆研究消耗表
 export const CarresearchItem = [
