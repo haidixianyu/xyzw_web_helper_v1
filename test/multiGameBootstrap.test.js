@@ -13,13 +13,19 @@ const bootstrapScript = [
   .map((match) => match[1])
   .find((script) => script.includes("loadMultiGameRuntime"));
 const expectedRuntimeFiles = [
+  "manifest-override.js",
   "patch.decrypted_readable.js",
+  "ws-capture.js",
   "src/settings.da7ef.js",
   "game-defines.a175e.js",
   "main.2a00e.js",
   "cocos2d-js-min.a5841.js",
   "xh.js",
   "sh1.js",
+  "bin-tool-drag-patch.js",
+  "nightmare-skip.js",
+  "map-zoom.js",
+  "peach-auto.js",
   "diagnose_require.js",
 ];
 

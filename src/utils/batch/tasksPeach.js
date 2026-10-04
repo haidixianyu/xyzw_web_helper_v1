@@ -24,6 +24,8 @@ import { sleep } from "../helperTaskRunner.js";
 
 const PEACH_POLL_INTERVAL = 3000; // 战场轮询间隔
 const PING_INTERVAL = 15000; // 心跳间隔
+const DEATH_WAIT_MAX = 10000; // 阵亡等待单段上限(期间穿插心跳)
+const MARCH_RETRY_MS = 8000; // 行军重发间隔(未到达且未行军中时)
 
 /** 统一日志格式 */
 function log(addLog, name, message, type = "info") {
@@ -63,6 +65,7 @@ function extractBattlefield(res, addLog, name) {
 
 /**
  * 解析蟠桃船列表 (兼容多种字段命名), 返回列表+实际命中的字段名
+ * recognizable=false 表示结构完全未命中, 调用方应进入只记录模式, 不要盲动
  */
 export function parsePeachShips(bf) {
   let hitField = "";
@@ -74,28 +77,31 @@ export function parsePeachShips(bf) {
     carData: bf?.carData,
   })) {
     if (val) {
-      shipsRaw =
-        val instanceof Map ? Object.fromEntries(val) : val;
+      shipsRaw = val instanceof Map ? Object.fromEntries(val) : val;
       hitField = field;
       break;
     }
   }
-  if (!shipsRaw) return { ships: [], hitField };
+  if (!shipsRaw) return { ships: [], hitField, recognizable: false };
   const list = Array.isArray(shipsRaw) ? shipsRaw : Object.values(shipsRaw);
-  const ships = list.map((ship) => ({
-    shipId: ship.carId ?? ship.id,
-    position: { x: ship.x ?? ship.position?.x ?? 0, y: ship.y ?? ship.position?.y ?? 0 },
-    progress: ship.progress ?? ship.schedule ?? 0,
-    controlLegionId: ship.legionId ?? ship.controlLegionId ?? 0,
-    hp: ship.hp ?? 0,
-    maxHp: ship.maxHp ?? ship.hp ?? 0,
-    defenders: ship.roleIds || ship.defenders || [],
-  }));
-  return { ships, hitField };
+  const ships = list
+    .filter((ship) => ship && typeof ship === "object")
+    .map((ship) => ({
+      shipId: ship.carId ?? ship.id,
+      position: { x: ship.x ?? ship.position?.x ?? 0, y: ship.y ?? ship.position?.y ?? 0 },
+      progress: Number(ship.progress ?? ship.schedule ?? 0),
+      controlLegionId: Number(ship.legionId ?? ship.controlLegionId ?? 0),
+      hp: Number(ship.hp ?? 0),
+      maxHp: Number(ship.maxHp ?? ship.hp ?? 0),
+      defenders: ship.roleIds || ship.defenders || [],
+    }));
+  return { ships, hitField, recognizable: true };
 }
 
 /**
  * 解析全部玩家角色, 返回列表+实际命中的字段名
+ * - 区分 die(等复活) 与 watching(未进场), 避免字段缺失导致全员误判阵亡
+ * - 兼容官方模型的 roleToCarId(Map roleId→carId) 与角色自带的 carId
  */
 export function parsePlayers(bf) {
   let hitField = "";
@@ -111,28 +117,51 @@ export function parsePlayers(bf) {
       break;
     }
   }
-  if (!playersRaw) return { players: [], hitField };
+  if (!playersRaw) return { players: [], hitField, recognizable: false };
+
+  // 官方模型用 roleToCarId(Map) 记录谁在哪艘船上
+  const roleToCarId = bf?.roleToCarId;
+  const carIdOf = (roleId) => {
+    if (roleToCarId && typeof roleToCarId.get === "function") {
+      const v =
+        roleToCarId.get(roleId) ??
+        roleToCarId.get(Number(roleId)) ??
+        roleToCarId.get(String(roleId));
+      if (v != null && v !== 0) return v;
+    }
+    return null;
+  };
+
   const list = Array.isArray(playersRaw) ? playersRaw : Object.values(playersRaw);
-  const players = list.map((p) => {
-    const state = p.state ?? p.roleState ?? "";
-    const sleepTime = Number(p.sleepTime ?? 0);
-    const hp = p.hp ?? 0;
-    const isDead =
-      state === "die" || state === "watching" ||
-      (state === "" && hp <= 0);
-    return {
-      roleId: Number(p.roleId ?? p.id),
-      legionId: p.legionId ?? p.legionID ?? 0,
-      hp,
-      maxHp: p.maxHp ?? p.maxhp ?? 0,
-      position: { x: p.x ?? p.position?.x ?? 0, y: p.y ?? p.position?.y ?? 0 },
-      carId: p.carId ?? null,
-      state,
-      sleepTime,
-      isDead,
-    };
-  });
-  return { players, hitField };
+  const players = list
+    .filter((p) => p && typeof p === "object")
+    .map((p) => {
+      const hasState = "state" in p || "roleState" in p;
+      const hasHp = "hp" in p || "curHp" in p;
+      const state = p.state ?? p.roleState ?? "";
+      const hp = Number(p.hp ?? p.curHp ?? 0);
+      const maxHp = Number(p.maxHp ?? p.maxhp ?? 0);
+      const sleepTime = Number(p.sleepTime ?? 0);
+      const roleId = Number(p.roleId ?? p.id);
+      const isDie = state === "die" || (!hasState && hasHp && hp <= 0);
+      const isWatching = state === "watching";
+      const carId = p.carId ?? carIdOf(roleId);
+      return {
+        roleId,
+        legionId: Number(p.legionId ?? p.legionID ?? 0),
+        hp,
+        maxHp,
+        position: { x: p.x ?? p.position?.x ?? 0, y: p.y ?? p.position?.y ?? 0 },
+        carId,
+        isOnCar: p.isOnCar === true || carId != null,
+        state,
+        sleepTime,
+        isDie,
+        isWatching,
+        isDead: isDie || isWatching, // 兼容旧字段名
+      };
+    });
+  return { players, hitField, recognizable: true };
 }
 
 /** 发送命令并等待响应, 记录命令与耗时; 失败抛出并记录 */
@@ -170,12 +199,18 @@ export async function deployTeam(tokenStore, tokenId, bfId, roleId, addLog, name
       tokenStore, tokenId, "payload_getteaminfo", { bfId, roleId }, addLog, name,
     );
     const teamInfo = teamRes?.teamInfo || teamRes?.data?.teamInfo || teamRes;
-    const battleTeam = teamInfo?.team || teamInfo?.battleTeam || {};
+    const rawTeam = teamInfo?.team || teamInfo?.battleTeam || {};
+    // 归一化: 槽位值可能是 {id,...} 对象, 统一取 heroId (源码 _team 存的是 heroId)
+    const battleTeam = {};
+    const srcEntries =
+      rawTeam instanceof Map ? Array.from(rawTeam.entries()) : Object.entries(rawTeam);
+    for (const [slot, v] of srcEntries) {
+      const heroId = v && typeof v === "object" ? (v.id ?? v.heroId) : v;
+      if (heroId != null) battleTeam[slot] = heroId;
+    }
     const lordWeaponId = Number(teamInfo?.weaponId ?? teamInfo?.lordWeaponId ?? 0);
     const petUId = String(teamInfo?.petUId ?? "");
-    const teamSize =
-      battleTeam instanceof Map ? battleTeam.size :
-      typeof battleTeam === "object" ? Object.keys(battleTeam).length : 0;
+    const teamSize = Object.keys(battleTeam).length;
 
     log(addLog, name,
       `[阵容] 查询结果: 队伍槽位=${teamSize} 武器=${lordWeaponId} 宠物=${petUId || "(空)"}` +
@@ -239,10 +274,14 @@ export async function runPeachBattle(options) {
     return dx * dx + dy * dy;
   };
 
+  let entered = false; // 是否已在战场(阵亡/观战后需重进)
+  let teamDeployed = false; // 阵容仅成功设置一次(失败下轮重试)
   let currentTargetShipId = null;
   let lastPingAt = 0;
-  let deployed = false;
+  let marchOrder = null; // { shipId, at } 避免每轮重复行军
   let loopCount = 0;
+  let probeDone = false; // 首样例探测是否已输出
+  let selfMissingStreak = 0;
 
   // 服务器时间校准信息
   const getClient = () => tokenStore.getWebSocketClient?.(tokenId) || null;
@@ -251,6 +290,10 @@ export async function runPeachBattle(options) {
     return client && typeof client.getServerTime === "function"
       ? client.getServerTime()
       : Date.now();
+  };
+  const ping = (bfId) => {
+    sendCmd(tokenStore, tokenId, "payload_ping", { bfId }, addLog, name).catch(() => {});
+    lastPingAt = Date.now();
   };
 
   // roleId 缺失时从 role_getroleinfo 回退获取
@@ -290,59 +333,59 @@ export async function runPeachBattle(options) {
       }
       const { bfId, raw } = bf;
 
-      // 2. 首次进战场 + 同步阵容
-      if (!deployed) {
-        await sendCmd(tokenStore, tokenId, "payload_enterbf", { bfId }, addLog, name);
-        log(addLog, name, `[进场] payload_enterbf 成功 (bfId:${bfId})`, "success");
-        await sleep(commandDelay);
-        await deployTeam(tokenStore, tokenId, bfId, rid, addLog, name);
-        deployed = true;
-      }
-
-      // 3. 心跳保活
-      if (Date.now() - lastPingAt > PING_INTERVAL) {
-        const offset = getClient()?.serverTimeOffset;
-        sendCmd(tokenStore, tokenId, "payload_ping", { bfId }, addLog, name).catch(() => {});
-        if (offset != null && loopCount % 20 === 1) {
-          log(addLog, name, `[时钟] 服务器时间偏移 ${Math.round(offset)}ms (EMA)`);
-        }
-        lastPingAt = Date.now();
-      }
-
-      // 4. 解析战场
-      const { ships, hitField: shipField } = parsePeachShips(raw);
-      const { players, hitField: playerField } = parsePlayers(raw);
+      // 2. 解析战场(防御式)
+      const { ships, hitField: shipField, recognizable: shipsOk } = parsePeachShips(raw);
+      const { players, hitField: playerField, recognizable: playersOk } = parsePlayers(raw);
       const self = players.find((p) => p.roleId === rid) || null;
 
-      // 结构探测日志: 仅前几轮输出, 避免刷屏
-      if (loopCount <= 3) {
+      // 首样例探测: 仅一次, 便于活动开启后核对字段名
+      if (!probeDone) {
+        probeDone = true;
         log(addLog, name,
-          `[解析] 第${loopCount}轮 船只字段=${shipField || "(未命中!)"} 共${ships.length}艘;` +
-          ` 玩家字段=${playerField || "(未命中!)"} 共${players.length}人;` +
-          ` self=${self ? "✓" : "✗ 未找到"}`);
-        if (loopCount === 1 && ships.length > 0) {
-          log(addLog, name,
-            `[解析] 首船样例: ${JSON.stringify(ships[0]).slice(0, 300)}`);
-        }
-        if (loopCount === 1 && !self && players.length > 0) {
-          log(addLog, name,
-            `[解析] 首玩家样例: ${JSON.stringify(players[0]).slice(0, 300)}`);
-        }
+          `[解析] 船只字段=${shipField || "(未命中!)"} 共${ships.length}艘;` +
+          ` 玩家字段=${playerField || "(未命中!)"} 共${players.length}人; self=${self ? "✓" : "✗"}`,
+          shipsOk && playersOk ? "info" : "error");
+        try {
+          log(addLog, name, `[解析] 战场顶层字段=[${Object.keys(raw || {}).slice(0, 25).join(",")}]`);
+          if (ships.length > 0) log(addLog, name, `[解析] 首船样例: ${JSON.stringify(ships[0]).slice(0, 300)}`);
+          if (players.length > 0) log(addLog, name, `[解析] 首玩家样例: ${JSON.stringify(players[0]).slice(0, 300)}`);
+        } catch (_) { /* 样例打印失败不影响主流程 */ }
       }
 
       if (onBattlefieldUpdate) {
         onBattlefieldUpdate({ ships, players, self, bfId, raw });
       }
 
-      if (ships.length > 0 && loopCount % 10 === 1) {
-        const summary = ships
-          .map((s) => `#${s.shipId}[${s.progress}% 军团:${s.controlLegionId || "无"}]`)
-          .join(" ");
-        log(addLog, name, `船况: ${summary}`);
+      // 3. 结构不可识别 → 只记录不盲动
+      if (!playersOk || !shipsOk) {
+        log(addLog, name,
+          `⚠ 战场结构未识别(玩家=${playerField || "无"} 船只=${shipField || "无"}), 进入只记录模式;` +
+          ` 请把首样例日志反馈以校正字段名`, "error");
+        await sleep(pollInterval);
+        continue;
+      }
+      if (!self) {
+        selfMissingStreak++;
+        if (selfMissingStreak <= 3 || selfMissingStreak % 20 === 0) {
+          log(addLog, name,
+            `未在玩家列表找到自身 roleId=${rid} (连续${selfMissingStreak}轮), 检查字段名`, "warn");
+        }
+        await sleep(pollInterval);
+        continue;
+      }
+      selfMissingStreak = 0;
+
+      // 4. 心跳保活(阵亡等待期间也会穿插)
+      if (Date.now() - lastPingAt > PING_INTERVAL) {
+        const offset = getClient()?.serverTimeOffset;
+        ping(bfId);
+        if (offset != null && loopCount % 20 === 1) {
+          log(addLog, name, `[时钟] 服务器时间偏移 ${Math.round(offset)}ms (EMA)`);
+        }
       }
 
-      // 5. 阵亡等待
-      if (self && self.isDead) {
+      // 5. 阵亡 → 按 sleepTime 分段等待复活(每段≤DEATH_WAIT_MAX, 期间穿插心跳)
+      if (self.isDie) {
         if (!autoResurrect) {
           log(addLog, name,
             `[复活] 阵亡(state=${self.state}) 且未开启自动复活, 结束监控`, "warning");
@@ -350,17 +393,34 @@ export async function runPeachBattle(options) {
         }
         let remainMs = self.sleepTime > 0 ? self.sleepTime - serverNow() : pollInterval;
         if (!Number.isFinite(remainMs) || remainMs < 0) remainMs = 0;
-        const waitMs = Math.min(remainMs + 500, 30000);
         log(addLog, name,
           `[复活] 阵亡(state=${self.state}) sleepTime=${self.sleepTime}` +
-          ` 服务器now=${serverNow()} 剩余=${remainMs}ms` +
-          ` → 等待 ${waitMs}ms`,
-          remainMs > 5000 ? "info" : "info");
-        await sleep(Math.max(waitMs, 1000));
+          ` 服务器now=${serverNow()} 剩余=${remainMs}ms`);
+        const t0 = Date.now();
+        while (!shouldStop() && Date.now() - t0 < Math.max(remainMs, 1000)) {
+          await sleep(Math.min(DEATH_WAIT_MAX, Math.max(remainMs - (Date.now() - t0), 1000)));
+          if (Date.now() - lastPingAt > PING_INTERVAL) ping(bfId);
+        }
+        entered = false; // 复活后需重新进场
+        marchOrder = null; // 需重新行军
+        log(addLog, name, `[复活] 等待结束, 重新进场`);
         continue;
       }
 
-      // 6. 目标选择
+      // 6. 进场(首次/观战/复活后) + 阵容仅成功设置一次(失败下轮重试)
+      if (!entered || self.isWatching) {
+        if (self.isWatching) log(addLog, name, `[进场] 当前 state=watching, 执行进场`);
+        await sendCmd(tokenStore, tokenId, "payload_enterbf", { bfId }, addLog, name);
+        entered = true;
+        await sleep(commandDelay);
+        if (!teamDeployed) {
+          const ok = await deployTeam(tokenStore, tokenId, bfId, rid, addLog, name);
+          if (ok) teamDeployed = true;
+          else log(addLog, name, `[阵容] 本次设置失败, 下轮重试`, "warning");
+        }
+      }
+
+      // 7. 目标选择
       let activeShips = ships.filter((s) => s.progress < 100);
       // 只上船不打人: 不限制目标(可上敌方船), 仅在决策阶段跳过攻击
       if (!contestEnemy && self?.legionId) {
@@ -373,6 +433,7 @@ export async function runPeachBattle(options) {
         if (!cur || cur.progress >= 100) {
           log(addLog, name, `[目标] 船 #${currentTargetShipId} 已送达(progress=${cur?.progress}), 重选`);
           currentTargetShipId = null;
+          marchOrder = null;
         }
       }
 
@@ -406,10 +467,30 @@ export async function runPeachBattle(options) {
         continue;
       }
 
-      // 7. 敌人检测
+      // 8. 是否已在目标船上 / 行军中(避免重复刷行军命令)
+      const onShip =
+        self.isOnCar === true || (self.carId != null && self.carId === targetShip.shipId);
+      const marching = self.state === "march";
+
+      // 未在目标船且未行军中才发行军; 同一目标仅发一次, MARCH_RETRY_MS 后可重发
+      const marchToTargetOnce = async (reason) => {
+        if (!self?.position || onShip || marching) return;
+        const need =
+          !marchOrder ||
+          marchOrder.shipId !== targetShip.shipId ||
+          Date.now() - marchOrder.at > MARCH_RETRY_MS;
+        if (!need) return;
+        log(addLog, name,
+          `[行军] ${reason} → 船#${targetShip.shipId} (进度${targetShip.progress}%)`);
+        await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name);
+        marchOrder = { shipId: targetShip.shipId, at: Date.now() };
+        await sleep(commandDelay);
+      };
+
+      // 9. 敌人检测(排除阵亡/未进场; 血最低优先)
       const enemiesOnShip = players
         .filter((p) => {
-          if (p.legionId === self?.legionId || p.isDead) return false;
+          if (p.legionId === self?.legionId || p.isDie || p.isWatching) return false;
           if (p.carId != null) return p.carId === targetShip.shipId;
           return (
             Math.abs(p.position.x - targetShip.position.x) < 50 &&
@@ -424,14 +505,11 @@ export async function runPeachBattle(options) {
           enemiesOnShip.slice(0, 3).map((e) => `#${e.roleId}(HP:${e.hp}/${e.maxHp}${e.carId != null ? ",car:" + e.carId : ""})`).join(" "));
       }
 
-      // 8. 决策执行
+      // 10. 决策执行
       const isEnemyControlled = targetShip.controlLegionId !== self?.legionId;
 
       if (enemiesOnShip.length > 0 && !noAttackPlayers) {
-        if (self?.position && isEnemyControlled) {
-          await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name);
-          await sleep(commandDelay);
-        }
+        await marchToTargetOnce("接近目标船");
         const target = enemiesOnShip[0];
         log(addLog, name,
           `[攻击] 船#${targetShip.shipId} 敌人#${target.roleId} HP:${target.hp}/${target.maxHp}` +
@@ -441,35 +519,21 @@ export async function runPeachBattle(options) {
         await sleep(commandDelay * 2);
       } else if (enemiesOnShip.length > 0 && noAttackPlayers) {
         // 只上船不打人: 船上有敌人也照常上船, 只是不发起攻击
-        if (self?.position) {
-          const dx = self.position.x - targetShip.position.x;
-          const dy = self.position.y - targetShip.position.y;
-          if (dx * dx + dy * dy > 100 * 100) {
-            log(addLog, name,
-              `[上船] 船#${targetShip.shipId} 有 ${enemiesOnShip.length} 名敌人, 只上船不打人, 行军上船`);
-            await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name);
-            await sleep(commandDelay);
-          }
-        }
+        await marchToTargetOnce("只上船不打人");
         await sleep(pollInterval);
-      } else if (isEnemyControlled && self?.position) {
-        log(addLog, name,
-          noAttackPlayers
-            ? `[上船] 敌控船#${targetShip.shipId} 暂无敌人, 行军上船(不打人)`
-            : `[逼近] 敌控船#${targetShip.shipId} 暂无敌人, 靠近待战`);
-        await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name);
-        await sleep(commandDelay);
-      } else if (self?.position) {
-        // 护送: 距离远才发行军, 避免重复刷命令
-        const dx = self.position.x - targetShip.position.x;
-        const dy = self.position.y - targetShip.position.y;
-        const dist2 = dx * dx + dy * dy;
-        if (dist2 > 100 * 100) {
-          log(addLog, name,
-            `[护送] 船#${targetShip.shipId} 距离${Math.round(Math.sqrt(dist2))} > 100, 行军跟随`);
-          await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name);
-          await sleep(commandDelay);
+      } else if (isEnemyControlled) {
+        await marchToTargetOnce(noAttackPlayers ? "敌控船(不打人)" : "逼近敌控船待战");
+      } else if (onShip) {
+        if (loopCount % 20 === 1) {
+          log(addLog, name, `[等待] 已在船#${targetShip.shipId} 无敌人 (进度${targetShip.progress}%)`);
         }
+      } else if (marching) {
+        if (loopCount % 20 === 1) {
+          log(addLog, name, `[等待] 行军中 → 船#${targetShip.shipId} (进度${targetShip.progress}%)`);
+        }
+      } else {
+        // 己方船护送: 未上船且未行军中 → 行军跟随
+        await marchToTargetOnce("护送己方船");
       }
 
       await sleep(pollInterval);

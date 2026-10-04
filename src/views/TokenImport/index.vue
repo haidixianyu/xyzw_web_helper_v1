@@ -966,6 +966,7 @@ const makeIconToggle = (keyPrefix, label) => {
 };
 const snowIcon = makeIconToggle("snow_icon_enabled", "❄️雪花图标");
 const zoomIcon = makeIconToggle("zoom_icon_enabled", "🔍缩放图标");
+const peachIcon = makeIconToggle("peach_icon_enabled", "🍑蟠桃图标");
 
 // 分组选择：选中的分组ID列表，用于按分组批量操作
 const selectedGroupIds = ref([]);
@@ -1212,6 +1213,7 @@ const bulkOptions = computed(() => [
   { type: "divider" },
   { label: iconToggleLabel(snowIcon, "❄️图标"), key: "toggleSnowIcon" },
   { label: iconToggleLabel(zoomIcon, "🔍图标"), key: "toggleZoomIcon" },
+  { label: iconToggleLabel(peachIcon, "🍑图标"), key: "togglePeachIcon" },
   { type: "divider" },
   { label: "导出Token和BIN", key: "exportWithBin" },
   { label: "导入Token和BIN", key: "importWithBin" },
@@ -1552,6 +1554,11 @@ const getTokenActions = (token) => {
       key: "toggle-zoom-icon",
       icon: () => h(NIcon, null, { default: () => h(SearchOutline) }),
     },
+    {
+      label: peachIcon.enabled(token.id) ? "关闭🍑图标" : "开启🍑图标",
+      key: "toggle-peach-icon",
+      icon: () => h(NIcon, null, { default: () => h(Cube) }),
+    },
     { type: "divider" },
     {
       label: "删除",
@@ -1597,6 +1604,9 @@ const handleTokenAction = async (key, token) => {
       break;
     case "toggle-zoom-icon":
       zoomIcon.toggle(token);
+      break;
+    case "toggle-peach-icon":
+      peachIcon.toggle(token);
       break;
   }
 };
@@ -1801,6 +1811,9 @@ const handleBulkAction = (key) => {
       break;
     case "toggleZoomIcon":
       toggleIconEnabledBulk(zoomIcon);
+      break;
+    case "togglePeachIcon":
+      toggleIconEnabledBulk(peachIcon);
       break;
     case "clean":
       cleanExpiredTokens();

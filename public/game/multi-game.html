@@ -46,6 +46,7 @@
         if (!window.__MULTI_GAME_BRIDGE_READY__) return;
 
         const runtime = [
+          "manifest-override.js",
           "patch.decrypted_readable.js",
           "ws-capture.js",
           "src/settings.da7ef.js",
@@ -57,6 +58,7 @@
           "bin-tool-drag-patch.js",
           "nightmare-skip.js",
           "map-zoom.js",
+          "peach-auto.js",
           "diagnose_require.js",
         ];
         const loadScript = (src) =>
