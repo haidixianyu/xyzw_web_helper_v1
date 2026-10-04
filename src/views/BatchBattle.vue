@@ -507,6 +507,19 @@
                     </div>
                   </div>
                   <div class="form-row">
+                    <span class="form-label">上船(实验)</span>
+                    <div class="switch-row">
+                      <label class="ui-switch">
+                        <input
+                          type="checkbox"
+                          v-model="peachOptions.boardCar"
+                        />
+                        <span class="ui-switch-track"></span>
+                      </label>
+                      <span class="switch-text">行军时带 carId=目标船id 尝试真正登船（关闭则仅陆地行军；该参数为推断，需活动窗口验证）</span>
+                    </div>
+                  </div>
+                  <div class="form-row">
                     <span class="form-label">自动复活</span>
                     <div class="switch-row">
                       <label class="ui-switch">
@@ -1358,6 +1371,7 @@ const saltOptions = useLocalStorage("batchBattle:saltOptions", defaultSaltOption
 const defaultPeachOptions = () => ({
   contestEnemyShips: true, // 抢夺敌方控制的船(打赢夺回控制权)
   noAttackPlayers: false, // 只上船不打人(小号打不过别人): 不攻击玩家, 可上船(含敌方船)
+  boardCar: true, // 上船实验: 行军带 carId=<目标船id> 尝试登船(关闭则仅陆地行军)
   autoResurrect: true, // 阵亡后按服务端 sleepTime 等待自动复活
   targetStrategy: "progress", // 目标船选择: progress=进度最高 | nearest=距离最近
   pollInterval: 3000, // 战场轮询间隔(ms)
@@ -2078,6 +2092,7 @@ const startPeachBattle = async () => {
             pollInterval: Math.max(Number(peachOptions.value.pollInterval) || 3000, 500),
             contestEnemy: peachOptions.value.contestEnemyShips !== false,
             noAttackPlayers: peachOptions.value.noAttackPlayers === true,
+            boardCar: peachOptions.value.boardCar !== false,
             targetStrategy: peachOptions.value.targetStrategy || "progress",
             autoResurrect: peachOptions.value.autoResurrect !== false,
           });

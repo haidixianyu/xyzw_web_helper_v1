@@ -7,7 +7,7 @@
  *  - payload_ping         { bfId }                   心跳
  *  - payload_setbattleteam { bfId, battleTeam, lordWeaponId, petUId }
  *  - payload_getteaminfo   { bfId, roleId }          查询队伍(响应含 weaponId/petUId/team)
- *  - payload_startmarch   { bfId, carId, path }      行军, carId=0 自己, path=[{x,y}...](首元素为当前坐标)
+ *  - payload_startmarch   { bfId, carId, path }      行军/上船; carId=0 自己走, carId=<船id> 上该船(推断, 待抓包核实), path=[{x,y}...](首元素为当前坐标)
  *  - payload_startbattle  { bfId, targetId }         攻击目标(roleId)
  *  - payload_cancelmarch  { bfId }                   取消行军
  *  - payload_useitem      { bfId, carId }            对船使用道具
@@ -233,16 +233,17 @@ export async function deployTeam(tokenStore, tokenId, bfId, roleId, addLog, name
  * 行军到目标坐标
  * path 首元素须为当前坐标 (源码 unshift)
  */
-export async function marchTo(tokenStore, tokenId, bfId, selfPos, targetPos, addLog, name) {
+export async function marchTo(tokenStore, tokenId, bfId, selfPos, targetPos, addLog, name, carId = 0) {
   const path = [
     { x: selfPos.x, y: selfPos.y },
     { x: targetPos.x, y: targetPos.y },
   ];
+  const tag = Number(carId) > 0 ? `上船 carId=${carId}` : "自走 carId=0";
   log(addLog, name,
-    `[行军] (${selfPos.x},${selfPos.y}) → (${targetPos.x},${targetPos.y})`);
+    `[行军] ${tag} (${selfPos.x},${selfPos.y}) → (${targetPos.x},${targetPos.y})`);
   return sendCmd(
     tokenStore, tokenId, "payload_startmarch",
-    { bfId, carId: 0, path }, addLog, name,
+    { bfId, carId: Number(carId) || 0, path }, addLog, name,
   );
 }
 
@@ -261,6 +262,7 @@ export async function runPeachBattle(options) {
     pollInterval = PEACH_POLL_INTERVAL, // 战场轮询间隔(ms)
     contestEnemy = true, // 是否抢夺敌方控制的船
     noAttackPlayers = false, // 只上船不打人(小号打不过别人): 不攻击玩家, 可上船(含敌方船)
+    boardCar = true, // 上船实验: 行军时带 carId=<目标船id> 尝试真正登船(关闭则 carId=0 只陆地行军)
     targetStrategy = "progress", // 目标船策略: progress=进度最高 | nearest=距离最近
     autoResurrect = true, // 阵亡后按服务端 sleepTime 等待自动复活
     onBattlefieldUpdate,
@@ -316,7 +318,7 @@ export async function runPeachBattle(options) {
 
   log(addLog, name,
     `=== 蟠桃园监控启动 === roleId=${rid} 抢夺敌船=${contestEnemy ? "开" : "关"}` +
-    ` 只上船不打人=${noAttackPlayers ? "开" : "关"}` +
+    ` 只上船不打人=${noAttackPlayers ? "开" : "关"} 上船=${boardCar ? "开" : "关"}` +
     ` 目标策略=${targetStrategy === "nearest" ? "距离最近" : "进度最高"}` +
     ` 自动复活=${autoResurrect ? "开" : "关"} 轮询=${pollInterval}ms 延时=${commandDelay}ms`);
 
@@ -480,9 +482,21 @@ export async function runPeachBattle(options) {
           marchOrder.shipId !== targetShip.shipId ||
           Date.now() - marchOrder.at > MARCH_RETRY_MS;
         if (!need) return;
+        const carId = boardCar ? targetShip.shipId : 0;
         log(addLog, name,
-          `[行军] ${reason} → 船#${targetShip.shipId} (进度${targetShip.progress}%)`);
-        await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name);
+          `[行军] ${reason} → 船#${targetShip.shipId} (进度${targetShip.progress}%)` +
+          `${boardCar ? " [带carId上船]" : ""}`);
+        try {
+          await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name, carId);
+        } catch (e) {
+          if (carId > 0) {
+            log(addLog, name,
+              `[行军] 带carId上船失败(${e.message}), 回退为陆地行军 carId=0`, "warning");
+            await marchTo(tokenStore, tokenId, bfId, self.position, targetShip.position, addLog, name, 0);
+          } else {
+            throw e;
+          }
+        }
         marchOrder = { shipId: targetShip.shipId, at: Date.now() };
         await sleep(commandDelay);
       };
