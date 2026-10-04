@@ -297,12 +297,30 @@
             try {
               data = e.rawData; // getter: 解码后的响应体(用于模拟)
             } catch (_) {}
-            push({
+            // 服务端错误文案: 游戏侧 _onWSMessage 对「偶数且非 0 的 code」执行 SHOW_TIP(e.error),
+            // 直接把服务端返回的原文弹到屏幕上(例: 「检测到您使用的客户端数据异常，请使用官方最新客户端」)。
+            // 该文案不存在于任何客户端代码, 属服务端下发; 旧实现只记 code + rawData, 而错误响应
+            // rawData 常为 null, 导致弹窗时无法反查是哪个 cmd 触发。这里补记 error 并高亮。
+            var errText = "";
+            try {
+              if (e.error != null) errText = String(e.error);
+              else if (e.data && e.data.error != null) errText = String(e.data.error);
+              else if (data && typeof data === "object" && data.error != null) errText = String(data.error);
+            } catch (_) {}
+            var rec = {
               k: "<<",
               cmd: e.cmd,
               code: e.code,
               data: data === undefined || data === null ? null : brief(data, 8000),
-            });
+            };
+            if (errText) {
+              rec.k = "<<!";
+              rec.error = brief(errText, 300);
+            }
+            push(rec);
+            if (errText && /客户端|数据异常|官方最新|异常/.test(errText)) {
+              toast("服务端提示(" + e.cmd + "): " + brief(errText, 60), false);
+            }
             // 盐场邀请专项诊断: 游戏侧 _InviteJoinTeamResp 以 `e.data.code||(...)` 开头,
             // 任何非 0 错误码都会被静默丢弃(点击后无任何提示), 这里把 code 显式弹出来
             if (/invitejointeam/i.test(e.cmd)) {

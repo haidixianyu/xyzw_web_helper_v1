@@ -483,8 +483,9 @@ export function registerDefaultCommands(reg) {
     .register("apex_getguesslist", { scheduleId: 0, idx: 0 })
     .register("apex_guess", { teamId: "" })
     .register("apex_guessclaim", { scheduleId: 0, teamId: "" })
-    .register("apex_getvotelist", { groupId: 0, idx: 0, round: 1 })
+    .register("apex_getvotelist", { groupId: 1, idx: 0, round: 1 })
     .register("apex_vote", { teamId: "", round: 1, voteCnt: 1 })
+    .register("apex_taskclaim", { confId: 0 })
     .register("apex_get64oppomap", { scheduleId: 0, groupId: 0 });
   registry.commands.set(
     "fight_startareaarena",
@@ -1175,6 +1176,7 @@ export class XyzwWebSocketClient {
       apex_guessclaimresp: "apex_guessclaim",
       apex_getvotelistresp: "apex_getvotelist",
       apex_voteresp: "apex_vote",
+      apex_taskclaimresp: "apex_taskclaim",
       apex_get64oppomapresp: "apex_get64oppomap",
       hero_recruitresp: "hero_recruit",
       friend_batchresp: "friend_batch",

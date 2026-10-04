@@ -43,23 +43,38 @@ function extractBattlefield(res, addLog, name) {
     ["res.body.battlefield", res?.body?.battlefield],
     // 实测响应顶层为 [info, ended, roleBfState, legions], 战场数据在 info 下
     ["res.info", res?.info],
+    // 自身在该战场的状态里也可能直接带 bfId
+    ["res.roleBfState", res?.roleBfState],
     ["res 自身", res],
   ];
   for (const [label, data] of candidates) {
-    if (!data) continue;
-    const bfId = Number(data.id ?? data.bfId ?? data.battlefieldId ?? 0);
-    if (bfId > 0) {
-      if (label !== "res 自身") {
-        log(addLog, name, `战场数据取自 ${label}, bfId=${bfId}`);
-      }
-      // 船只/玩家字段可能在顶层(如 res.cars)而非 info 内, 合并保证解析器可见
-      const raw = data === res ? res : { ...res, ...data };
-      return { bfId, raw };
+    if (!data || typeof data !== "object") continue;
+    // 注意: 实测蟠桃 bfId 是形如 "261004:4366" 的字符串(日期:战场号),
+    // 旧代码 Number("261004:4366") 得到 NaN 会误判为解析失败, 故此处保留原始字符串
+    const rawBfId = data.bfId ?? data.id ?? data.battlefieldId ?? "";
+    const asText = String(rawBfId ?? "").trim();
+    if (!asText || asText === "0") continue;
+    const bfId = /^\d+$/.test(asText) ? Number(asText) : asText;
+    if (label !== "res 自身") {
+      log(addLog, name, `战场数据取自 ${label}, bfId=${bfId}`);
     }
+    // 船只/玩家字段可能在顶层(如 res.cars)而非 info 内, 合并保证解析器可见
+    const raw = data === res ? res : { ...res, ...data };
+    return { bfId, raw };
   }
-  // 全部失败: 输出顶层字段名帮助定位真实结构
+  // 全部失败: 输出顶层字段名 + info 结构 + ended 标记, 便于定位 bfId 真实位置
   const keys = res && typeof res === "object" ? Object.keys(res).slice(0, 15).join(",") : typeof res;
-  log(addLog, name, `未解析出 bfId! 响应顶层字段: [${keys}]`, "error");
+  let hint = "";
+  try {
+    const info = res?.info;
+    if (info && typeof info === "object") {
+      hint += ` info字段=[${Object.keys(info).slice(0, 20).join(",")}]`;
+    } else if (info !== undefined) {
+      hint += ` info值=${JSON.stringify(info)?.slice(0, 80)}`;
+    }
+    if (res?.ended !== undefined) hint += ` ended=${JSON.stringify(res.ended)}`;
+  } catch (_) { /* 诊断信息尽力而为, 失败不影响主流程 */ }
+  log(addLog, name, `未解析出 bfId! 响应顶层字段: [${keys}]${hint}`, "error");
   return null;
 }
 

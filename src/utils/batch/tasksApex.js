@@ -1,10 +1,19 @@
 /**
  * 逐鹿盐山任务
- * 包含: 一键批量竞猜（自动选助威最高队伍）、领取竞猜奖励、逐鹿助威
+ * 包含: 一键批量竞猜（自动选助威最高队伍）、领取竞猜奖励、逐鹿助威（含助威任务奖励领取）
  */
 
 // 助威单次请求票数上限（分批投出，避免单次过大被服务端拒绝）
 const APEX_VOTE_CHUNK = 10;
+
+// 助威任务 confId 列表（游戏内逐个领取；抓包确认: 4=助威券×5、5=助威券×10、7=物品16002×10）
+const APEX_TASK_CONF_IDS = [4, 5, 7];
+
+// 助威券 itemId（任务奖励中领到后可用于继续投票）
+const APEX_TICKET_ITEM_ID = 16001;
+
+// 无投票记录时的助威届数向下探测起点
+const APEX_VOTE_ROUND_PROBE_START = 12;
 
 /**
  * 创建逐鹿盐山竞猜任务执行器
@@ -533,14 +542,15 @@ export function createTasksApex(deps) {
   };
 
   /**
-   * 拉取某届某页助威候选队伍（groupId 固定 0，idx 步长 10 与客户端一致）
+   * 拉取某届某页助威候选队伍
+   * groupId 固定传 1（与游戏客户端一致；2026-10-04 抓包确认传 0 时服务端不返回队伍数据）
    */
   const fetchVoteList = async (tokenId, round, idx) => {
     try {
       const resp = await tokenStore.sendMessageWithPromise(
         tokenId,
         "apex_getvotelist",
-        { groupId: 0, idx, round },
+        { groupId: 1, idx, round },
         8000,
       );
       return resp?.apexVoteList || [];
@@ -551,8 +561,11 @@ export function createTasksApex(deps) {
 
   /**
    * 逐鹿盐山助威：把助威券投给当前届助威数最高的队伍（或指定队伍）
-   * 助威轮次 round 为"届数"，由 apex_getroleinfo.voteMap 的已投届数推测；
-   * 券余额取自 apexRoleInfo.voteItemCnt，逐批发券避免单次过大被拒。
+   * 流程对齐游戏客户端（2026-10-04 抓包）：
+   * 先领取已完成的助威任务（apex_taskclaim，奖励含助威券）凑券 → 投票 →
+   * 再领一次（投票可能新完成任务）→ 请求票数未投够且领到新券时补投。
+   * 助威轮次 round 为"届数"，从最新已投届数+1（无记录则从探测上限）逐届向下探测，
+   * 第一届有队伍列表的即为当前届。
    * @param {string} target - 队伍名称或 teamId；为空则选助威数最高的队伍
    * @param {number} inputVoteCount - 本次投出票数（>0 按该票数，超过券余额则投完为止；<=0 全部投出）
    */
@@ -590,15 +603,61 @@ export function createTasksApex(deps) {
         const apexInfo = roleResp?.apexRoleInfo || {};
         let voteItemCnt = Number(apexInfo.voteItemCnt) || 0;
         const voteMap = apexInfo.voteMap || {};
+        const taskClaimedMap = apexInfo.taskClaimedMap || {};
 
-        if (voteItemCnt <= 0) {
+        const rewardMap = {};
+
+        /**
+         * 领取助威任务奖励（confId 见 APEX_TASK_CONF_IDS，逐个尝试）
+         * 未达成条件/已领取的会返回非0错误码，静默跳过
+         * @returns {number} 本次领到的助威券数量
+         */
+        const claimApexVoteTasks = async () => {
+          let tickets = 0;
+          for (const confId of APEX_TASK_CONF_IDS) {
+            if (shouldStop.value) break;
+            if (taskClaimedMap[confId] === true) continue;
+            try {
+              const resp = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "apex_taskclaim",
+                { confId },
+                8000,
+              );
+              taskClaimedMap[confId] = true;
+              for (const item of resp?.reward || []) {
+                const value = Number(item?.value) || 0;
+                const key =
+                  item?.itemId === APEX_TICKET_ITEM_ID
+                    ? "助威券"
+                    : item?.itemId
+                      ? `物品${item.itemId}`
+                      : "银币";
+                rewardMap[key] = (rewardMap[key] || 0) + value;
+                if (item?.itemId === APEX_TICKET_ITEM_ID) tickets += value;
+              }
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 领取助威任务 confId=${confId} 成功`,
+                type: "success",
+              });
+            } catch (e) {
+              // 未达成条件或不可领取，静默跳过
+            }
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return tickets;
+        };
+
+        // 0. 投前先领取已完成的助威任务（奖励含助威券，凑券一起投）
+        const firstTickets = await claimApexVoteTasks();
+        if (firstTickets > 0) {
+          voteItemCnt += firstTickets;
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 没有助威券，跳过`,
-            type: "warning",
+            message: `${token.name} 助威任务领到助威券 ${firstTickets} 张，现有 ${voteItemCnt} 张`,
+            type: "info",
           });
-          tokenStatus.value[tokenId] = "completed";
-          return;
         }
 
         // 本次投出票数：输入 >0 按其值（不超过券余额），否则全部投出
@@ -608,19 +667,30 @@ export function createTasksApex(deps) {
             ? Math.min(wantCnt, voteItemCnt)
             : voteItemCnt;
 
-        // 1. 确定当前助威届数：优先试最新已投届数+1（新一届），再回退到最新已投届数
+        if (quota <= 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 没有助威券且助威任务无可领奖励，跳过`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        // 1. 确定当前助威届数：从最新已投届数+1（无记录则从探测上限）逐届向下探测，
+        //    第一届有队伍列表的即为当前届
         const votedRounds = Object.keys(voteMap)
           .map(Number)
           .filter((n) => Number.isFinite(n))
           .sort((a, b) => b - a);
-        const roundCandidates =
+        const probeStart =
           votedRounds.length > 0
-            ? [votedRounds[0] + 1, votedRounds[0]]
-            : [1, 2, 3, 4];
+            ? votedRounds[0] + 1
+            : APEX_VOTE_ROUND_PROBE_START;
 
-        let round = roundCandidates[0];
+        let round = 0;
         let firstPage = [];
-        for (const r of roundCandidates) {
+        for (let r = probeStart; r >= 1; r--) {
           if (shouldStop.value) break;
           firstPage = await fetchVoteList(tokenId, r, 0);
           if (firstPage.length > 0) {
@@ -674,31 +744,57 @@ export function createTasksApex(deps) {
         });
 
         // 3. 分批投出（每批不超过 APEX_VOTE_CHUNK 张）
-        let voted = 0;
-        let failCount = 0;
-        const rewardMap = {};
-        while (quota - voted > 0 && !shouldStop.value) {
-          const cnt = Math.min(APEX_VOTE_CHUNK, quota - voted);
-          try {
-            const resp = await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "apex_vote",
-              { teamId: team.teamId, round, voteCnt: cnt },
-              8000,
-            );
-            voted += cnt;
-            const left = Number(resp?.apexRoleInfo?.voteItemCnt);
-            voteItemCnt = Number.isFinite(left) ? left : voteItemCnt - cnt;
-            for (const item of resp?.reward || []) {
-              const key = item?.itemId ? `物品${item.itemId}` : "银币";
-              rewardMap[key] = (rewardMap[key] || 0) + (Number(item?.value) || 0);
+        const voteChunks = async (quotaOnce) => {
+          let voted = 0;
+          let failCount = 0;
+          while (quotaOnce - voted > 0 && !shouldStop.value) {
+            const cnt = Math.min(APEX_VOTE_CHUNK, quotaOnce - voted);
+            try {
+              const resp = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "apex_vote",
+                { teamId: team.teamId, round, voteCnt: cnt },
+                8000,
+              );
+              voted += cnt;
+              const left = Number(resp?.apexRoleInfo?.voteItemCnt);
+              voteItemCnt = Number.isFinite(left) ? left : voteItemCnt - cnt;
+              for (const item of resp?.reward || []) {
+                const key = item?.itemId ? `物品${item.itemId}` : "银币";
+                rewardMap[key] = (rewardMap[key] || 0) + (Number(item?.value) || 0);
+              }
+            } catch (err) {
+              failCount++;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 投票被拒(${cnt}张): ${err.message}`,
+                type: "warning",
+              });
+              // 被拒（如每日上限/届数不对）就停止，避免连续报错
+              break;
             }
-          } catch (err) {
-            failCount++;
-            // 被拒（如每日上限）就停止，避免连续报错
-            break;
+            await new Promise((res) => setTimeout(res, 400));
           }
-          await new Promise((res) => setTimeout(res, 400));
+          return { voted, failCount };
+        };
+
+        const firstPass = await voteChunks(quota);
+        let totalVoted = firstPass.voted;
+        let totalFail = firstPass.failCount;
+
+        // 4. 投后再领一次（投票可能新完成任务，如"助威1次"）；
+        //    若请求票数尚未投够且领到新券，则用新券补投
+        const secondTickets = await claimApexVoteTasks();
+        if (secondTickets > 0 && !shouldStop.value) {
+          voteItemCnt += secondTickets;
+          const wantTotal =
+            Number.isFinite(wantCnt) && wantCnt > 0 ? wantCnt : Infinity;
+          const remain = wantTotal - totalVoted;
+          if (remain > 0 && totalFail === 0) {
+            const secondPass = await voteChunks(Math.min(secondTickets, remain));
+            totalVoted += secondPass.voted;
+            totalFail += secondPass.failCount;
+          }
         }
 
         const rewardText = Object.entries(rewardMap)
@@ -707,7 +803,7 @@ export function createTasksApex(deps) {
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 助威完成: 投出${voted}票 失败${failCount} 剩余券${voteItemCnt}${rewardText ? " 奖励 " + rewardText : ""} ===`,
+          message: `=== ${token.name} 助威完成: 投出${totalVoted}票 失败${totalFail} 剩余券${voteItemCnt}${rewardText ? " 奖励 " + rewardText : ""} ===`,
           type: "success",
         });
       } catch (error) {
