@@ -51,6 +51,7 @@
           "ws-capture.js",
           "src/settings.da7ef.js",
           "game-defines.a175e.js",
+          "official-version-sync.js",
           "main.2a00e.js",
           "cocos2d-js-min.a5841.js",
           "xh.js",
@@ -89,6 +90,8 @@
           document.getElementById("minimizeBtn")?.click();
           window.HtmlIsLoaded = true;
           document.getElementById("splash").style.display = "none";
+          // 等待官方 GAME_VERSION 探测定稿（最长 5s、永不 reject）再启动游戏
+          await (window.__xyzwVersionSyncReady || Promise.resolve());
           await window.boot();
           notify("ready");
         })().catch(() => {

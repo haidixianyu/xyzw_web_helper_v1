@@ -57,6 +57,7 @@
     <script src="ws-capture.js" charset="utf-8"></script>
     <script src="src/settings.da7ef.js" charset="utf-8"></script>
     <script src="game-defines.a175e.js" charset="utf-8"></script>
+    <script src="official-version-sync.js" charset="utf-8"></script>
     <script src="main.2a00e.js" charset="utf-8"></script>
     <script src="cocos2d-js-min.a5841.js" charset="utf-8"></script>
     <script src="xh.js" charset="utf-8"></script>
@@ -71,7 +72,10 @@
         window.HtmlIsLoaded = true;
         var splash = document.getElementById("splash");
         splash.style.display = "none";
-        window.boot();
+        // 等待官方 GAME_VERSION 探测定稿（最长 5s、永不 reject）再启动游戏
+        (window.__xyzwVersionSyncReady || Promise.resolve()).then(function () {
+          window.boot();
+        });
       })();
     </script>
   </body>

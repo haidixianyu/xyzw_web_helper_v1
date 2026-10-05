@@ -150,16 +150,46 @@ export class CommandRegistry {
   }
 }
 
+/**
+ * 官方 h5web 客户端版本号（role_getroleinfo 登录身份用，动态跟随官方）
+ *
+ * 依据(2026-10-05 抓包 log6.txt): 官方 h5web 客户端 WS 登录帧为
+ *   {"platform":"hortor","platformExt":"h5web","inviteUid":0,"clientVersion":"1.90.3-h5web","scene":""}
+ * 旧默认值 clientVersion:"2.34.1-...-wx" + platformExt:"mix" 是官方客户端不可能产生的
+ * wx 老版本组合，触发服务端「检测到您使用的客户端数据异常，请使用官方最新客户端」，
+ * 盐场/蟠桃等核验严格的玩法直接被拦截。
+ *
+ * official-version-sync.js（游戏 iframe 内，public/game/）每次启动会把最新官方版本写入
+ * 同源 localStorage["xyzw_official_version_v1"]，此处每次发包时读取跟随官方；
+ * 从未打开过游戏页（无记录）时回退到抓包基准值。
+ */
+function officialClientVersion() {
+  try {
+    const rec = JSON.parse(
+      localStorage.getItem("xyzw_official_version_v1") || "null",
+    );
+    if (rec && rec.version) return rec.version;
+  } catch {
+    /* 解析失败回退基准值 */
+  }
+  return "1.90.3-h5web";
+}
+
 /** 预注册游戏命令 */
 export function registerDefaultCommands(reg) {
   const registry = reg
     .registerHeartbeat()
     // 角色/系统
     .register("role_getroleinfo", {
-      clientVersion: "2.34.1-fa918e1997301834-wx",
+      // 登录身份必须与官方 h5web 客户端一致（见 officialClientVersion 注释）。
+      // clientVersion 用 getter：CommandRegistry 展开默认体时每次发包都会求值，
+      // 官方 bump 版本后自动跟随，无需改代码。
+      get clientVersion() {
+        return officialClientVersion();
+      },
       inviteUid: 0,
       platform: "hortor",
-      platformExt: "mix",
+      platformExt: "h5web",
       scene: "",
     })
     .register("system_getdatabundlever", { isAudit: false })
@@ -350,6 +380,8 @@ export function registerDefaultCommands(reg) {
     .register("nightmare_setfighter")
     .register("nightmare_fight")
     .register("nightmare_dismiss")
+    // 十殿符咒购买 (nightmare_buycharmresp, params: {charmId, buyNum})
+    .register("nightmare_buycharm")
     .register("dungeon_selecthero")
     .register("bosstower_gethelprank")
     .register("dungeon_buymerchant")
@@ -1165,6 +1197,7 @@ export class XyzwWebSocketClient {
       nightmare_getroleinforesp: "nightmare_getroleinfo",
       nightmare_setfighterresp: "nightmare_setfighter",
       nightmare_fightresp: "nightmare_fight",
+      nightmare_buycharmresp: "nightmare_buycharm",
       fight_startlevelresp: "fight_startlevel",
       fight_calcleveltimeresp: "fight_calcleveltime",
       fight_levelresp: "fight_level",

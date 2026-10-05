@@ -18,6 +18,9 @@ gt.GAME_ID = 'xyzw_mix'
 // 纯手动也弹 → 判定为服务端身份核验: platform=h5web 必须搭配官方 h5web 的版本号
 // (官方 h5web 线上 game-defines_1653c: GAME_VERSION='1.90.3-h5web'), 旧值 0.32.0-android 是
 // 官方客户端不可能产生的组合。若弹窗依旧: 回退本值 + 依赖 ws-capture 的 <<! 条目定位真实触发 cmd。
+// 2026-10-05 起: 本值仅作兜底 —— official-version-sync.js 启动时自动探测官方
+// xxz-xyzw-res.hortorgames.com/h5web/ 的 game-defines.<hash>.js 并覆盖此值,
+// 探测失败(网络/改版)时才落到此处钉死的值。
 gt.GAME_VERSION = '1.90.3-h5web'
 gt.CODE_VERSION = '2.44.2'
 gt.COMMIT_ID = ''
