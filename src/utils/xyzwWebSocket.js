@@ -54,6 +54,7 @@ const errorCodeMap = {
   4800080: "不在规定时间内或未到报名阶段",
   4800040: "俱乐部没有报名",
   2100010: "活动未开放",
+  11800010: "怪异寻宝暂无可领取的奖励（未达新档位或已领完）",
 };
 
 // 事件节流定义表，根据实际需要调整命令和节流时间
@@ -311,6 +312,11 @@ export function registerDefaultCommands(reg) {
     // 怪异塔一键领取: 俱乐部特权 / 俱乐部任务奖励
     .register("evotower_claimlegionprivilege")
     .register("evotower_claimlegiontask", { taskId: 1 })
+    // 怪异塔助力(分享码互助): 分享信息/我的分享码/接受他人分享码/领取助力任务奖励
+    .register("evotower_getshareinfo")
+    .register("evotower_getsharecode")
+    .register("evotower_acceptsharebycode")
+    .register("evotower_claimsharetaskreward", { taskId: 1 })
 
     // 瓶子机器人
     .register("bottlehelper_claim")
@@ -1249,6 +1255,10 @@ export class XyzwWebSocketClient {
       mergebox_claimmergeprogressresp: "mergebox_claimmergeprogress",
       evotower_claimtaskresp: ["evotower_claimtask", "evotower_claimlegiontask"],
       evotower_claimlegionprivilegeresp: "evotower_claimlegionprivilege",
+      evotower_getshareinforesp: "evotower_getshareinfo",
+      evotower_getsharecoderesp: "evotower_getsharecode",
+      evotower_acceptsharebycoderesp: "evotower_acceptsharebycode",
+      evotower_claimsharetaskrewardresp: "evotower_claimsharetaskreward",
       item_openpackresp: "item_openpack",
       equipment_quenchresp: "equipment_quench",
       rank_getserverrankresp: "rank_getserverrank",

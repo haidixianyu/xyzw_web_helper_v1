@@ -722,7 +722,8 @@ export function createTasksTower(deps) {
 
   /**
    * 一键领取子步骤：怪异寻宝累计消耗奖励（钥匙）
-   * costTotalCnt > costClaimCnt 时领取，服务端一次补发所有已达档位的钥匙。
+   * costTotalCnt/costClaimCnt 只是消耗与已领计数，与档位达成不一一对应：
+   * 未达新档位时服务端会拒绝(11800010)，属正常现象（单开版同样吞掉该错误），不能因此中断整个任务。
    */
   const claimEvoTowerCostProgress = async (tokenId, mergeBox, log) => {
     const total = mergeBox?.costTotalCnt || 0;
@@ -733,20 +734,26 @@ export function createTasksTower(deps) {
       return 0;
     }
 
-    const res = await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "mergebox_claimcostprogress",
-      { actType: 1 },
-      5000,
-    );
-    const count = Array.isArray(res?.reward) ? res.reward.length : 0;
-    log(`累计消耗奖励领取成功（${count} 项）`, "success");
-    return count;
+    try {
+      const res = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "mergebox_claimcostprogress",
+        { actType: 1 },
+        5000,
+      );
+      const count = Array.isArray(res?.reward) ? res.reward.length : 0;
+      log(`累计消耗奖励领取成功（${count} 项）`, "success");
+      return count;
+    } catch (e) {
+      log("累计消耗奖励暂无可领取档位（未达新档位，服务端拒绝）", "info");
+      return 0;
+    }
   };
 
   /**
    * 一键领取子步骤：怪异寻宝免费钥匙
    * mergebox freeEnergy > 0 时领取，即原「一键领取怪异塔免费道具」逻辑。
+   * 服务端偶尔会拒绝（如钥匙尚未真正到可领时间），吞掉拒绝不中断后续步骤。
    */
   const claimEvoTowerFreeEnergy = async (tokenId, mergeBox, log) => {
     const freeEnergy = mergeBox?.freeEnergy || 0;
@@ -756,14 +763,19 @@ export function createTasksTower(deps) {
       return 0;
     }
 
-    await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "mergebox_claimfreeenergy",
-      { actType: 1 },
-      5000,
-    );
-    log(`怪异寻宝免费钥匙领取成功（${freeEnergy} 个）`, "success");
-    return freeEnergy;
+    try {
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "mergebox_claimfreeenergy",
+        { actType: 1 },
+        5000,
+      );
+      log(`怪异寻宝免费钥匙领取成功（${freeEnergy} 个）`, "success");
+      return freeEnergy;
+    } catch (e) {
+      log("怪异寻宝免费钥匙领取被服务端拒绝，跳过", "info");
+      return 0;
+    }
   };
 
   /**

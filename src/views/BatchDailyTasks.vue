@@ -676,6 +676,13 @@
                   >
                     十殿转盘
                   </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="showCharmBuyModal = true"
+                  >
+                    十殿买符
+                  </n-button>
                 </n-space>
 
                 <!-- 玄武赐福 -->
@@ -833,6 +840,13 @@
                   </template>
                   依次领取怪异塔奖励：① 俱乐部特权 ② 俱乐部任务奖励 ③ 爬塔之路 ④ 累计消耗奖励（钥匙） ⑤ 怪异寻宝免费钥匙（原“一键领取怪异塔免费道具”） ⑥ 合成等级奖励
                 </n-tooltip>
+                <n-button
+                  size="small"
+                  @click="openTowerShareModal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  怪异塔助力
+                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="daily" tab="日常">
@@ -1513,6 +1527,156 @@
         >
           {{ cnt }} 票
         </n-button>
+      </div>
+    </n-modal>
+
+    <!-- 怪异塔助力 -->
+    <n-modal
+      v-model:show="showTowerShareModal"
+      preset="card"
+      title="怪异塔助力"
+      style="width: 95%; max-width: 1150px"
+      :auto-focus="false"
+    >
+      <n-space vertical>
+        <n-space align="center">
+          <n-button
+            size="small"
+            :loading="towerShareLoading"
+            @click="refreshTowerShareInfo"
+          >
+            刷新信息
+          </n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :loading="towerShareClaiming"
+            @click="towerShareClaimAll"
+          >
+            一键领取奖励
+          </n-button>
+        </n-space>
+        <n-table size="small" :single-line="false">
+          <thead>
+            <tr>
+              <th>账号</th>
+              <th>钥匙(已耗/剩余)</th>
+              <th>道具等级</th>
+              <th>分享码</th>
+              <th>谁助力了我</th>
+              <th>我助力了谁</th>
+              <th>任务进度</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in towerShareRows" :key="row.tokenId">
+              <td>{{ row.name }}</td>
+              <td class="tower-share-key-cell">
+                {{ row.consumed }} / {{ row.lotteryLeft }}
+              </td>
+              <td>{{ row.mergeLevel > 0 ? `${row.mergeLevel} 级` : "—" }}</td>
+              <td>
+                <span
+                  v-if="row.shareCode"
+                  class="tower-share-code"
+                  title="点击复制"
+                  @click="copyTowerShareCode(row.shareCode)"
+                >
+                  {{ row.shareCode }}
+                </span>
+                <span v-else>—</span>
+              </td>
+              <td class="tower-share-role-cell">{{ row.helpersText }}</td>
+              <td class="tower-share-role-cell">
+                <template v-if="row.helpedEmpty">
+                  <div class="tower-share-accept">
+                    <n-input
+                      v-model:value="row.acceptCode"
+                      size="tiny"
+                      placeholder="小号分享码"
+                      style="width: 130px"
+                    />
+                    <n-button
+                      size="tiny"
+                      type="primary"
+                      :loading="row.status === '助力中…'"
+                      :disabled="towerShareLoading"
+                      @click="towerShareAcceptRow(row)"
+                    >
+                      助力
+                    </n-button>
+                  </div>
+                </template>
+                <template v-else>{{ row.helpedText }}</template>
+              </td>
+              <td>
+                <span
+                  v-for="t in row.tasks"
+                  :key="t.taskId"
+                  class="tower-share-task"
+                >
+                  任务{{ t.taskId }}: 进度{{ t.progress }} 已领{{ t.claimedProgress }}
+                </span>
+              </td>
+              <td class="tower-share-status-cell">{{ row.status }}</td>
+              <td>
+                <n-button
+                  size="tiny"
+                  :disabled="row.status !== 'OK'"
+                  @click="towerShareClaimRow(row)"
+                >
+                  领取
+                </n-button>
+              </td>
+            </tr>
+          </tbody>
+        </n-table>
+      </n-space>
+    </n-modal>
+
+    <!-- 十殿买符 - 选择符咒与数量 -->
+    <n-modal
+      v-model:show="showCharmBuyModal"
+      preset="card"
+      title="十殿买符 - 选择符咒与数量"
+      style="width: 90%; max-width: 420px"
+      :auto-focus="false"
+    >
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <div>
+          <div style="margin-bottom: 8px">
+            选择符咒（可多选，按十殿编号从小到大购买，每张消耗 10 love）：
+          </div>
+          <n-checkbox-group v-model:value="charmBuySelection">
+            <n-space size="small" wrap>
+              <n-checkbox v-for="n in 6" :key="n" :value="n">
+                十殿{{ n }}符
+              </n-checkbox>
+            </n-space>
+          </n-checkbox-group>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px">
+          <span>每种购买数量：</span>
+          <n-input-number
+            v-model:value="charmBuyNum"
+            size="small"
+            :min="1"
+            :max="50"
+            :step="1"
+            style="width: 110px"
+          />
+        </div>
+        <div style="text-align: right">
+          <n-button
+            type="primary"
+            :disabled="charmBuySelection.length === 0"
+            @click="startCharmBuy"
+          >
+            开始购买({{ charmBuySelection.length }}种×{{ charmBuyNum }}张)
+          </n-button>
+        </div>
       </div>
     </n-modal>
 
@@ -3739,6 +3903,7 @@ import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
+import { copyToClipboard } from "@/utils/clubBattleUtils.js";
 import { Settings, ChevronDown, ChevronUp } from "@vicons/ionicons5";
 import { workerSleep } from "@/utils/workerTimer.js";
 import { DEFAULT_WEIRD_TOWER_MAX_CLIMB } from "@/utils/towerClimbLimit.js";
@@ -8741,32 +8906,28 @@ const fetchFullInfo = async () => {
 // ==================== 星级信息 ====================
 const starInfoLoading = ref(false);
 
-// 取出成员 extParam 中最新一期星数键（形如 nmExtStarCnt_260914，后缀是本周起始日）
-const pickStarKey = (extParam) => {
-  if (!extParam || typeof extParam !== "object") return "";
-  const keys = Object.keys(extParam)
-    .filter((k) => k.startsWith("nmExtStarCnt_"))
-    .sort();
-  return keys.length > 0 ? keys[keys.length - 1] : "";
+// 本周星数周期：北京时间当周周一（键后缀 yyMMDD + 零点时间戳），如 key=261005 → 2026-10-05(周一)
+// 依据: nmext_getinforesp.starResetTime=1791129600=2026-10-05 00:00(+08:00)，每周一零点刷新
+const starWeekInfo = () => {
+  const DAY = 86400000;
+  const bjMs = Date.now() + 8 * 3600 * 1000; // 平移后用 UTC 方法即北京时间挂钟
+  const days = Math.floor(bjMs / DAY);
+  const mondayMs = (days - ((days + 3) % 7)) * DAY; // 1970-01-01 为周四，(days+3)%7 即距周一的天数
+  const d = new Date(mondayMs);
+  return {
+    key:
+      String(d.getUTCFullYear() % 100).padStart(2, "0") +
+      String(d.getUTCMonth() + 1).padStart(2, "0") +
+      String(d.getUTCDate()).padStart(2, "0"),
+    startSec: mondayMs / 1000 - 8 * 3600,
+  };
 };
 
-// 从成员 extParam 中解析星数（取最新一期的值）
+// 从成员 extParam 解析本周星数：严格读本周键 nmExtStarCnt_<本周一>，
+// 无键 = 本周未录星，按 0 计（与游戏内功德簿"总星级"口径一致，不得回落到上期键值）
 const pickStarCount = (extParam) => {
-  const key = pickStarKey(extParam);
-  if (!key) return 0;
-  const value = Number(extParam[key]);
-  return Number.isFinite(value) ? value : 0;
-};
-
-// 星数键后缀(如 260914)即本周起始日，返回该日 UTC+8 零点的秒级时间戳
-// 例: nmExtStarCnt_260914 → 2026-09-14 00:00(+08:00) = 1789315200，与 nmext_getinfo 的 starResetTime 一致
-const parseStarWeekStart = (starKey) => {
-  const m = /^nmExtStarCnt_(\d{2})(\d{2})(\d{2})$/.exec(starKey || "");
-  if (!m) return 0;
-  const year = 2000 + Number(m[1]);
-  const month = Number(m[2]) - 1;
-  const day = Number(m[3]);
-  return Date.UTC(year, month, day) / 1000 - 8 * 3600;
+  const star = Number(extParam?.[`nmExtStarCnt_${starWeekInfo().key}`]);
+  return Number.isFinite(star) ? star : 0;
 };
 
 // 把单支队伍的成员整理成日志内可渲染的表格（队长用图标前缀区分，未录入星数用 ⚠️ 标记）
@@ -8861,20 +9022,13 @@ const fetchStarInfo = async () => {
           );
           const info = teamRes?.teamInfo || teamRes || {};
           const rawMembers = info.fightRoleBase || [];
-          // 本周起点：取全队成员中最新的星数键换算（各成员键一致，取最新即可）
-          const weekStart = parseStarWeekStart(
-            rawMembers
-              .map((m) => pickStarKey(m.extParam))
-              .filter(Boolean)
-              .sort()
-              .pop() || "",
-          );
+          // 本周起点（北京时间周一零点）：lockedTime 是最近一次录入时刻，早于本周起点 = 本周未录入
+          const weekStart = starWeekInfo().startSec;
           const members = rawMembers.map((m) => ({
             name: m.name || String(m.roleId),
             star: pickStarCount(m.extParam),
             isLeader: String(m.roleId) === String(info.leaderId),
-            // lockedTime 是本周星数锁定时刻：早于本周起点说明本周未录入，星数不生效
-            recorded: !weekStart || Number(m.lockedTime) >= weekStart,
+            recorded: Number(m.lockedTime) >= weekStart,
           }));
           members.sort((a, b) => b.star - a.star);
           const team = {
@@ -8936,6 +9090,291 @@ const fetchStarInfo = async () => {
     );
   } finally {
     starInfoLoading.value = false;
+  }
+};
+
+// ==================== 怪异塔助力（批量） ====================
+// 协议(2026-10-06 抓包): evotower_getshareinfo/getsharecode/acceptsharebycode/claimsharetaskreward
+// inviteRoleIdMap=接受了我分享码的人(谁助力了我); helpRoleIdMap=我接受过其码的人(我助力了谁);
+// shareTaskMap:{taskId:{typ,progress,claimedProgress}}, progress>claimedProgress 即可领
+const showTowerShareModal = ref(false);
+const towerShareLoading = ref(false);
+const towerShareRows = ref([]);
+const towerShareClaiming = ref(false);
+const towerShareNameCache = new Map();
+
+// 当前合成道具等级：mergeBox.taskMap 键后两位为档位等级，值非 0 表示已达成该档
+const towerShareMergeLevel = (mergeBox) => {
+  const taskMap = mergeBox?.taskMap || {};
+  let level = 0;
+  for (const taskId of Object.keys(taskMap)) {
+    if (!taskMap[taskId]) continue;
+    const lv = parseInt(String(taskId).slice(-2), 10);
+    if (Number.isFinite(lv) && lv > level) level = lv;
+  }
+  return level;
+};
+
+// roleId → 名字：role_gettargetteam 查询，失败回退显示 roleId 尾号
+const resolveTowerShareRoleName = async (tokenId, roleId) => {
+  const key = String(roleId);
+  if (towerShareNameCache.has(key)) return towerShareNameCache.get(key);
+  let name = `角色${key.slice(-6)}`;
+  try {
+    const res = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "role_gettargetteam",
+      { targetId: key },
+      6000,
+    );
+    name = res?.roleBattleTeam?.role?.name || res?.teamInfo?.name || name;
+  } catch (e) {
+    // 查询失败回退显示 roleId 尾号
+  }
+  towerShareNameCache.set(key, name);
+  return name;
+};
+
+const buildTowerShareRoleText = async (tokenId, map) => {
+  const entries = Object.entries(map || {});
+  if (entries.length === 0) return "—";
+  const names = [];
+  for (const [roleId, ts] of entries) {
+    const name = await resolveTowerShareRoleName(tokenId, roleId);
+    names.push(
+      ts
+        ? `${name}(${new Date(Number(ts) * 1000).toLocaleDateString()})`
+        : name,
+    );
+  }
+  return names.join("、");
+};
+
+// 拉取单个账号的助力信息（需已建立连接），返回行数据
+// 钥匙列(2026-10-06 抓包): 已消耗 = mergeboxinforesp.mergeBox.costTotalCnt; 剩余 = evotowerinforesp.evoTower.lotteryLeftCnt
+const fetchTowerShareRow = async (tokenId, name) => {
+  const row = {
+    tokenId,
+    name,
+    consumed: "—",
+    lotteryLeft: "—",
+    mergeLevel: 0,
+    shareCode: "",
+    helpersText: "—",
+    helpedText: "—",
+    helpedEmpty: true,
+    acceptCode: "",
+    tasks: [],
+    status: "OK",
+  };
+  const [evoRes, shareRes, codeRes, boxRes] = await Promise.all([
+    tokenStore.sendMessageWithPromise(tokenId, "evotower_getinfo", {}, 6000),
+    tokenStore.sendMessageWithPromise(tokenId, "evotower_getshareinfo", {}, 6000),
+    tokenStore.sendMessageWithPromise(tokenId, "evotower_getsharecode", {}, 6000),
+    tokenStore
+      .sendMessageWithPromise(tokenId, "mergebox_getinfo", { actType: 1 }, 6000)
+      .catch(() => null),
+  ]);
+  row.consumed = boxRes?.mergeBox?.costTotalCnt ?? "—";
+  row.lotteryLeft = evoRes?.evoTower?.lotteryLeftCnt ?? "—";
+  row.mergeLevel = towerShareMergeLevel(boxRes?.mergeBox);
+  row.shareCode = codeRes?.shareCode || "";
+  const shareTask = shareRes?.shareTask || {};
+  row.tasks = Object.keys(shareTask.shareTaskMap || {})
+    .sort((a, b) => Number(a) - Number(b))
+    .map((taskId) => {
+      const t = shareTask.shareTaskMap[taskId] || {};
+      return {
+        taskId,
+        typ: t.typ ?? "-",
+        progress: t.progress || 0,
+        claimedProgress: t.claimedProgress || 0,
+      };
+    });
+  row.helpersText = await buildTowerShareRoleText(
+    tokenId,
+    shareTask.inviteRoleIdMap,
+  );
+  const helpedEntries = Object.entries(shareTask.helpRoleIdMap || {});
+  row.helpedEmpty = helpedEntries.length === 0;
+  row.helpedText = await buildTowerShareRoleText(tokenId, shareTask.helpRoleIdMap);
+  return row;
+};
+
+const openTowerShareModal = () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择要查询的账号");
+    return;
+  }
+  showTowerShareModal.value = true;
+  refreshTowerShareInfo();
+};
+
+// 逐账号建立连接读取助力信息
+const refreshTowerShareInfo = async () => {
+  const targetIds = [...selectedTokens.value];
+  towerShareLoading.value = true;
+  towerShareRows.value = targetIds.map((tokenId) => ({
+    tokenId,
+    name: tokens.value.find((t) => t.id === tokenId)?.name || tokenId,
+    consumed: "…",
+    lotteryLeft: "…",
+    mergeLevel: 0,
+    shareCode: "",
+    helpersText: "…",
+    helpedText: "…",
+    helpedEmpty: true,
+    acceptCode: "",
+    tasks: [],
+    status: "读取中…",
+  }));
+  let failCount = 0;
+  try {
+    for (const tokenId of targetIds) {
+      if (shouldStop.value) break;
+      const row = towerShareRows.value.find((r) => r.tokenId === tokenId);
+      try {
+        await ensureConnection(tokenId);
+        Object.assign(row, await fetchTowerShareRow(tokenId, row.name));
+      } catch (e) {
+        failCount++;
+        row.status = `失败: ${e?.message || e}`;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${row.name} 怪异塔助力信息读取失败: ${e?.message || e}`,
+          type: "warning",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+  } finally {
+    towerShareLoading.value = false;
+  }
+  if (failCount === 0) {
+    message.success(`助力信息读取完成（${targetIds.length}个账号）`);
+  } else {
+    message.warning(`助力信息读取完成，失败 ${failCount} 个（详见日志）`);
+  }
+};
+
+const copyTowerShareCode = async (code) => {
+  try {
+    await copyToClipboard(code);
+    message.success("分享码已复制");
+  } catch {
+    message.error("复制失败，请手动复制");
+  }
+};
+
+// 重新读取单行数据（行内助力成功后局部刷新）
+const refreshTowerShareRow = async (row) => {
+  try {
+    await ensureConnection(row.tokenId);
+    Object.assign(row, await fetchTowerShareRow(row.tokenId, row.name));
+  } finally {
+    tokenStore.closeWebSocketConnection(row.tokenId);
+    releaseConnectionSlot();
+  }
+};
+
+// 行内助力：该账号接受小号的分享码（仅「我助力了谁」为空时显示入口）
+const towerShareAcceptRow = async (row) => {
+  const code = (row.acceptCode || "").trim();
+  if (!code) {
+    message.warning(`${row.name}: 请先输入小号的分享码`);
+    return;
+  }
+  row.status = "助力中…";
+  try {
+    await ensureConnection(row.tokenId);
+    await tokenStore.sendMessageWithPromise(
+      row.tokenId,
+      "evotower_acceptsharebycode",
+      { shareCode: code },
+      6000,
+    );
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${row.name} 助力成功（接受分享码 ${code}）`,
+      type: "success",
+    });
+    await refreshTowerShareRow(row);
+  } catch (e) {
+    row.status = `失败: ${e?.message || e}`;
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${row.name} 助力失败: ${e?.message || e}`,
+      type: "warning",
+    });
+  } finally {
+    tokenStore.closeWebSocketConnection(row.tokenId);
+    releaseConnectionSlot();
+  }
+};
+
+// 领取单个账号所有可领的助力任务奖励（progress > claimedProgress 才尝试）
+const towerShareClaimRow = async (row) => {
+  const claimable = row.tasks.filter(
+    (t) => t.progress > t.claimedProgress,
+  );
+  if (claimable.length === 0) {
+    message.info(`${row.name} 暂无可领取的助力奖励`);
+    return;
+  }
+  row.status = "领取中…";
+  let ok = 0;
+  try {
+    await ensureConnection(row.tokenId);
+    for (const t of claimable) {
+      try {
+        await tokenStore.sendMessageWithPromise(
+          row.tokenId,
+          "evotower_claimsharetaskreward",
+          { taskId: Number(t.taskId) },
+          6000,
+        );
+        ok++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${row.name} 助力任务${t.taskId}奖励领取成功`,
+          type: "success",
+        });
+        await new Promise((r) => setTimeout(r, 300));
+      } catch (e) {
+        // 未达标/已领取，跳过
+      }
+    }
+    row.status = `已领${ok}/${claimable.length}`;
+  } catch (e) {
+    row.status = `失败: ${e?.message || e}`;
+  } finally {
+    tokenStore.closeWebSocketConnection(row.tokenId);
+    releaseConnectionSlot();
+  }
+};
+
+const towerShareClaimAll = async () => {
+  const rows = towerShareRows.value.filter(
+    (r) =>
+      r.status === "OK" &&
+      r.tasks.some((t) => t.progress > t.claimedProgress),
+  );
+  if (rows.length === 0) {
+    message.info("没有可领取的助力奖励");
+    return;
+  }
+  towerShareClaiming.value = true;
+  try {
+    for (const row of rows) {
+      if (shouldStop.value) break;
+      await towerShareClaimRow(row);
+    }
+    message.success(`助力奖励领取完成（${rows.length}个账号）`);
+    await refreshTowerShareInfo();
+  } finally {
+    towerShareClaiming.value = false;
   }
 };
 
@@ -9087,7 +9526,7 @@ const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess, batchApexClaimRewards, batchApexVote } = tasksApex;
 
 const tasksShidian = createTasksShidian(createTaskDeps());
-const { batchShidianReward } = tasksShidian;
+const { batchShidianReward, batchShidianBuyCharm } = tasksShidian;
 
 const tasksCampChallenge = createTasksCampChallenge(createTaskDeps());
 const { batchCampChallenge, batchCampChallengePet, batchCampClaimTasks } = tasksCampChallenge;
@@ -9140,6 +9579,27 @@ const footballPickLabel = computed(() => {
 const onFootballPickChange = async (val) => {
   footballPick.value = val;
   await batchFootballBet(val);
+};
+
+// 十殿买符：弹框选择要购买的符咒（charmId=十殿编号）与数量，确认后对选中账号执行；
+// 未勾选符咒时无法确认，未选中账号时按钮禁用且执行前二次校验
+const showCharmBuyModal = ref(false);
+const charmBuySelection = ref([]);
+const charmBuyNum = ref(1);
+const startCharmBuy = () => {
+  showCharmBuyModal.value = false;
+  if (charmBuySelection.value.length === 0) {
+    message.warning("请先勾选要购买的十殿符咒");
+    return;
+  }
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择账号");
+    return;
+  }
+  batchShidianBuyCharm(
+    [...charmBuySelection.value].sort((a, b) => a - b),
+    charmBuyNum.value,
+  );
 };
 
 const refreshBattleVersion = async (tokenId) => {
@@ -9988,6 +10448,43 @@ const stopBatch = () => {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+}
+
+/* 怪异塔助力弹窗 */
+.tower-share-key-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tower-share-accept {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tower-share-code {
+  cursor: pointer;
+  font-family: monospace;
+  word-break: break-all;
+  color: #2080f0;
+}
+
+.tower-share-role-cell {
+  max-width: 170px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.tower-share-task {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tower-share-status-cell {
+  font-size: 12px;
+  max-width: 130px;
+  word-break: break-all;
 }
 
 .template-card-info {

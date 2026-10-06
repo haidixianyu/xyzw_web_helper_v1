@@ -106,6 +106,7 @@ import {
   DEFAULT_WEIRD_TOWER_MAX_CLIMB,
   normalizeWeirdTowerMaxClimb,
 } from "@/utils/towerClimbLimit.js";
+import { copyToClipboard } from "@/utils/clubBattleUtils.js";
 
 const tokenStore = useTokenStore();
 const message = useMessage();

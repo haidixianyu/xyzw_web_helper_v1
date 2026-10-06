@@ -247,7 +247,123 @@ export function createTasksShidian(deps) {
     message.success("批量十殿奖励领取结束");
   };
 
+  /**
+   * 批量购买十殿符咒（十殿买符）
+   * 协议依据 2026-10-05 抓包 log6.txt:
+   *   请求  nightmare_buycharm {charmId, buyNum}
+   *   响应  nightmare_buycharmresp {charmId, num, love, charmLeftNumMap, success}
+   *   charmId 即十殿编号（抓包购买十殿2/十殿5 各1张），每张消耗 10 love，
+   *   charmLeftNumMap 为各符咒剩余限购数量；单张失败不中断，继续买下一张
+   */
+  const batchShidianBuyCharm = async (charmIds = [], buyNum = 1) => {
+    // 仅对选中的账号生效，未选中账号直接拦截
+    if (selectedTokens.value.length === 0) {
+      message.warning("请先选择账号");
+      return;
+    }
+
+    const ids = (Array.isArray(charmIds) ? charmIds : String(charmIds).split(","))
+      .map((v) => parseInt(v, 10))
+      .filter((v) => v > 0);
+    if (ids.length === 0) {
+      message.warning("请先选择要购买的十殿符咒");
+      return;
+    }
+    const num = Math.max(1, parseInt(buyNum, 10) || 1);
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        await ensureConnection(tokenId);
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始十殿买符: ${token.name}（十殿${ids.join("、十殿")}符 ×${num}）===`,
+          type: "info",
+        });
+
+        let successCnt = 0;
+        for (const charmId of ids) {
+          if (shouldStop.value) break;
+          try {
+            const resp = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "nightmare_buycharm",
+              { charmId, buyNum: num },
+              8000,
+            );
+            // 响应体不含 code；success 为 false 时视为服务端拒绝
+            if (resp && resp.success === false) {
+              throw new Error("服务端返回 success=false");
+            }
+            successCnt++;
+            const bought = Number(resp?.num) || 0;
+            const leftMap = resp?.charmLeftNumMap;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 十殿${charmId}符咒购买成功 ×${bought}${
+                resp?.love !== undefined ? `，剩余love:${resp.love}` : ""
+              }${leftMap ? `，剩余限购:${JSON.stringify(leftMap)}` : ""}`,
+              type: "success",
+            });
+          } catch (err) {
+            const msg = String(err?.message || err || "");
+            // 服务器业务错误（限购已满/love不足等）视为单张失败，继续下一张
+            const isBusinessErr = /服务器错误|2000\d\d/.test(msg);
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 十殿${charmId}符咒购买失败: ${msg}${isBusinessErr ? "（继续下一张）" : ""}`,
+              type: isBusinessErr ? "warning" : "error",
+            });
+          }
+          await sleep(commandDelay());
+        }
+
+        tokenStatus.value[tokenId] = successCnt > 0 ? "completed" : "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 十殿买符完成（成功 ${successCnt}/${ids.length}）===`,
+          type: successCnt > 0 ? "success" : "error",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 十殿买符失败: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量十殿买符结束");
+  };
+
   return {
     batchShidianReward,
+    batchShidianBuyCharm,
   };
 }
