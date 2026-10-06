@@ -1535,7 +1535,7 @@
       v-model:show="showTowerShareModal"
       preset="card"
       title="怪异塔助力"
-      style="width: 95%; max-width: 1150px"
+      style="width: 95%; max-width: 720px"
       :auto-focus="false"
     >
       <n-space vertical>
@@ -1556,83 +1556,93 @@
             一键领取奖励
           </n-button>
         </n-space>
-        <n-table size="small" :single-line="false">
-          <thead>
-            <tr>
-              <th>账号</th>
-              <th>钥匙(已耗/剩余)</th>
-              <th>道具等级</th>
-              <th>分享码</th>
-              <th>谁助力了我</th>
-              <th>我助力了谁</th>
-              <th>任务进度</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in towerShareRows" :key="row.tokenId">
-              <td>{{ row.name }}</td>
-              <td class="tower-share-key-cell">
-                {{ row.consumed }} / {{ row.lotteryLeft }}
-              </td>
-              <td>{{ row.mergeLevel > 0 ? `${row.mergeLevel} 级` : "—" }}</td>
-              <td>
+        <!-- 卡片式布局：桌面多列网格，移动端单列堆叠 -->
+        <div class="tower-share-list">
+          <div
+            v-for="row in towerShareRows"
+            :key="row.tokenId"
+            class="tower-share-card"
+          >
+            <div class="tower-share-card-head">
+              <span class="tower-share-name">{{ row.name }}</span>
+              <span class="tower-share-status">{{ row.status }}</span>
+              <n-button
+                size="small"
+                :disabled="row.status !== 'OK'"
+                @click="towerShareClaimRow(row)"
+              >
+                领取奖励
+              </n-button>
+            </div>
+            <div class="tower-share-grid">
+              <div class="tower-share-item">
+                <span class="tower-share-item-label">钥匙(已耗/剩余)</span>
+                <span class="tower-share-item-value tower-share-key-num">
+                  {{ row.consumed }} / {{ row.lotteryLeft }}
+                </span>
+              </div>
+              <div class="tower-share-item">
+                <span class="tower-share-item-label">道具等级</span>
+                <span class="tower-share-item-value">
+                  {{ row.mergeLevel > 0 ? `${row.mergeLevel} 级` : "—" }}
+                </span>
+              </div>
+              <div class="tower-share-item">
+                <span class="tower-share-item-label">分享码(点击复制)</span>
                 <span
                   v-if="row.shareCode"
-                  class="tower-share-code"
-                  title="点击复制"
+                  class="tower-share-item-value tower-share-code"
+                  :title="row.shareCode"
                   @click="copyTowerShareCode(row.shareCode)"
                 >
-                  {{ row.shareCode }}
+                  {{ abbrTowerShareCode(row.shareCode) }}
                 </span>
-                <span v-else>—</span>
-              </td>
-              <td class="tower-share-role-cell">{{ row.helpersText }}</td>
-              <td class="tower-share-role-cell">
-                <template v-if="row.helpedEmpty">
-                  <div class="tower-share-accept">
-                    <n-input
-                      v-model:value="row.acceptCode"
-                      size="tiny"
-                      placeholder="小号分享码"
-                      style="width: 130px"
-                    />
-                    <n-button
-                      size="tiny"
-                      type="primary"
-                      :loading="row.status === '助力中…'"
-                      :disabled="towerShareLoading"
-                      @click="towerShareAcceptRow(row)"
-                    >
-                      助力
-                    </n-button>
-                  </div>
-                </template>
-                <template v-else>{{ row.helpedText }}</template>
-              </td>
-              <td>
-                <span
-                  v-for="t in row.tasks"
-                  :key="t.taskId"
-                  class="tower-share-task"
-                >
-                  任务{{ t.taskId }}: 进度{{ t.progress }} 已领{{ t.claimedProgress }}
+                <span v-else class="tower-share-item-value">—</span>
+              </div>
+              <div class="tower-share-item tower-share-item-wide">
+                <span class="tower-share-item-label">谁助力了我</span>
+                <span class="tower-share-item-value tower-share-item-value-left">
+                  {{ row.helpersText }}
                 </span>
-              </td>
-              <td class="tower-share-status-cell">{{ row.status }}</td>
-              <td>
-                <n-button
-                  size="tiny"
-                  :disabled="row.status !== 'OK'"
-                  @click="towerShareClaimRow(row)"
-                >
-                  领取
-                </n-button>
-              </td>
-            </tr>
-          </tbody>
-        </n-table>
+              </div>
+              <div class="tower-share-item tower-share-item-wide">
+                <span class="tower-share-item-label">我助力了谁</span>
+                <div v-if="row.helpedEmpty" class="tower-share-accept">
+                  <n-input
+                    v-model:value="row.acceptCode"
+                    size="small"
+                    placeholder="输入小号的分享码"
+                  />
+                  <n-button
+                    size="small"
+                    type="primary"
+                    :loading="row.status === '助力中…'"
+                    :disabled="towerShareLoading"
+                    @click="towerShareAcceptRow(row)"
+                  >
+                    助力
+                  </n-button>
+                </div>
+                <span v-else class="tower-share-item-value tower-share-item-value-left">
+                  {{ row.helpedText }}
+                </span>
+              </div>
+              <div class="tower-share-item tower-share-item-wide">
+                <span class="tower-share-item-label">任务进度</span>
+                <span class="tower-share-item-value">
+                  <span
+                    v-for="t in row.tasks"
+                    :key="t.taskId"
+                    class="tower-share-task"
+                  >
+                    任务{{ t.taskId }}: 进度{{ t.progress }} 已领{{ t.claimedProgress }}
+                  </span>
+                  <span v-if="row.tasks.length === 0">—</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </n-space>
     </n-modal>
 
@@ -9259,6 +9269,14 @@ const refreshTowerShareInfo = async () => {
   }
 };
 
+// 分享码显示缩写：保留头尾各4位，中间用...（复制时仍用完整码）
+const abbrTowerShareCode = (code) => {
+  if (!code) return "";
+  return code.length > 11
+    ? `${code.slice(0, 4)}...${code.slice(-4)}`
+    : code;
+};
+
 const copyTowerShareCode = async (code) => {
   try {
     await copyToClipboard(code);
@@ -10450,41 +10468,116 @@ const stopBatch = () => {
   gap: 8px;
 }
 
-/* 怪异塔助力弹窗 */
-.tower-share-key-cell {
+/* 怪异塔助力弹窗（卡片式，桌面多列网格 / 移动端单列堆叠；列表内部滚动限制弹窗高度） */
+.tower-share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 220px);
+  min-height: 120px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+
+.tower-share-card {
+  border: 1px solid #efeff5;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafc;
+}
+
+.tower-share-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tower-share-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 45%;
+}
+
+.tower-share-status {
+  flex: 1;
+  font-size: 12px;
+  color: #999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.tower-share-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 4px 14px;
+}
+
+/* 标签与值同行显示，压缩卡片高度 */
+.tower-share-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.tower-share-item-wide {
+  grid-column: 1 / -1;
+}
+
+.tower-share-item-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #909090;
+}
+
+.tower-share-item-value {
+  font-size: 13px;
+  word-break: break-all;
+  text-align: right;
+  min-width: 0;
+}
+
+/* 助力对象名字居左显示 */
+.tower-share-item-value-left {
+  text-align: left;
+}
+
+.tower-share-key-num {
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .tower-share-accept {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  /* 输入框不必占满整行，限制最大宽度 */
+  max-width: 420px;
+  margin-left: auto;
 }
 
 .tower-share-code {
   cursor: pointer;
   font-family: monospace;
-  word-break: break-all;
+  white-space: nowrap;
   color: #2080f0;
 }
 
-.tower-share-role-cell {
-  max-width: 170px;
-  font-size: 12px;
-  word-break: break-all;
-}
-
 .tower-share-task {
-  display: block;
+  display: inline-block;
   font-size: 12px;
-  white-space: nowrap;
-}
-
-.tower-share-status-cell {
-  font-size: 12px;
-  max-width: 130px;
-  word-break: break-all;
+  margin-right: 10px;
 }
 
 .template-card-info {
