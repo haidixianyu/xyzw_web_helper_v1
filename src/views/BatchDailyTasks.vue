@@ -4846,6 +4846,7 @@ const ITEM_NAMES = {
   35009: "零件",
   5286: "蜜饯",
   5287: "玉盏",
+  37001: "怪异塔钥匙",
 };
 
 // 从 Map 或普通对象中按数字键取值
@@ -9333,6 +9334,8 @@ const towerShareAcceptRow = async (row) => {
 };
 
 // 领取单个账号所有可领的助力任务奖励（progress > claimedProgress 才尝试）
+// taskId 编码(2026-10-07 抓包定案): taskId = (typ-1)*3 + 档位, 不是 shareTaskMap 的键
+// 实抓: typ3 已领2/进度3 → 第3档 → taskId 9 → 领到 37001 钥匙×3
 const towerShareClaimRow = async (row) => {
   const claimable = row.tasks.filter(
     (t) => t.progress > t.claimedProgress,
@@ -9343,28 +9346,49 @@ const towerShareClaimRow = async (row) => {
   }
   row.status = "领取中…";
   let ok = 0;
+  let planned = 0;
   try {
     await ensureConnection(row.tokenId);
     for (const t of claimable) {
-      try {
-        await tokenStore.sendMessageWithPromise(
-          row.tokenId,
-          "evotower_claimsharetaskreward",
-          { taskId: Number(t.taskId) },
-          6000,
-        );
-        ok++;
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${row.name} 助力任务${t.taskId}奖励领取成功`,
-          type: "success",
-        });
+      const typ = Number(t.typ) || Number(t.taskId) || 1;
+      // 逐档领取: 档位从 已领+1 到 进度
+      // taskId 编码已实测确认(2026-10-07): typ1档1/2/3→1/2/3, typ3档1→7, 即 (typ-1)*3+档位
+      for (let tier = t.claimedProgress + 1; tier <= t.progress; tier++) {
+        planned++;
+        const taskId = (typ - 1) * 3 + tier;
+        try {
+          const res = await tokenStore.sendMessageWithPromise(
+            row.tokenId,
+            "evotower_claimsharetaskreward",
+            { taskId },
+            6000,
+          );
+          ok++;
+          const rewards = Array.isArray(res?.reward)
+            ? `: ${res.reward
+                .map(
+                  (r) => `${ITEM_NAMES[r.itemId] || r.itemId}×${r.value}`,
+                )
+                .join(", ")}`
+            : "";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${row.name} 助力任务typ${typ}第${tier}档领取成功${rewards}`,
+            type: "success",
+          });
+        } catch (e) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${row.name} 助力任务typ${typ}第${tier}档领取失败(taskId ${taskId}): ${e?.message || e}`,
+            type: "warning",
+          });
+          // 该档失败, 后续档位大概率同样失败, 放弃该任务剩余档位
+          break;
+        }
         await new Promise((r) => setTimeout(r, 300));
-      } catch (e) {
-        // 未达标/已领取，跳过
       }
     }
-    row.status = `已领${ok}/${claimable.length}`;
+    row.status = `已领${ok}/${planned}`;
   } catch (e) {
     row.status = `失败: ${e?.message || e}`;
   } finally {
