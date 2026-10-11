@@ -698,6 +698,30 @@ const connectWebSocket = () => {
 /**
  * 建立盐场连接请求与处理
  */
+// 与主连接一致: 存储的 token 可能是 base64/JSON 包装, 需解析出 actualToken 再拼 URL
+const extractActualToken = (base64String) => {
+  try {
+    const clean = String(base64String || "")
+      .replace(/^data:.*base64,/, "")
+      .trim();
+    if (!clean) return "";
+    let decoded;
+    try {
+      decoded = atob(clean);
+    } catch {
+      decoded = clean;
+    }
+    try {
+      const data = JSON.parse(decoded);
+      return String(data.token || data.gameToken || decoded);
+    } catch {
+      return decoded;
+    }
+  } catch {
+    return "";
+  }
+};
+
 const fetchBattleRecords1 = async (getbattlefield) => {
   if (tokenStore.selectedToken) {
     const tokenId = tokenStore.selectedToken.id
@@ -706,7 +730,17 @@ const fetchBattleRecords1 = async (getbattlefield) => {
       connectWebSocket();
       return;
     }
-    const baseWsUrl = 'wss://xxz-xyzw-new.hortorgames.com/agent' +`?p=${encodeURIComponent(tokenStore.selectedToken.token)}&e=x&sid2=${getbattlefield?.info.sid}&lang=chinese&sid2=${getbattlefield?.info.sid}`
+    // 重复进战场: 先断开旧连接, 避免同角色重复登录被服务器拒绝(客户端异常)
+    if (legionWarWebSocket) {
+      try {
+        legionWarWebSocket.disconnect();
+      } catch (e) {
+        console.warn("断开旧战场连接失败:", e)
+      }
+      legionWarWebSocket = null;
+    }
+    const actualToken = extractActualToken(tokenStore.selectedToken.token);
+    const baseWsUrl = 'wss://xxz-xyzw-new.hortorgames.com/agent' +`?p=${encodeURIComponent(actualToken)}&e=x&sid2=${getbattlefield?.info.sid}&lang=chinese`
     hint.value = getbattlefield?.info.battlefieldId;
     legionWarWebSocket =  new XyzwLegionWarWebSocketClient({
       url: baseWsUrl,

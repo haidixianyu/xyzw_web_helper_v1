@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import * as autoRoutes from "vue-router/auto-routes";
 import { useTokenStore } from '@/stores/tokenStore'
-import { isNowInLegionWarTime } from "@/utils/clubBattleUtils"
 
 const generatedRoutes = autoRoutes.routes ?? [];
 
@@ -90,7 +89,7 @@ const my_routes = [
         name: 'LegionWar',
         component: () => import('@/views/LegionWar.vue'),
         meta: {
-          title: '实时盐场',
+          title: '盐场监控',
           requiresToken: true
         }
       },
@@ -198,11 +197,7 @@ router.beforeEach((to, from, next) => {
 
   // 设置页面标题
   document.title = to.meta.title ? `${to.meta.title} - XYZW 游戏管理系统` : 'XYZW 游戏管理系统'
-  if(to.name==="LegionWar"&&!isNowInLegionWarTime()){
-  // if(to.name==="LegionWar"&&isNowInLegionWarTime()){
-    next('/admin/dashboard');
-    return;
-  }
+  // 盐场页面时间门控已按需求移除: /admin/legion-war 任何时间可访问
   // 检查是否需要Token
   // if (to.meta.requiresToken  && tokenStore.getWebSocketStatus(tokenStore.selectedToken.id)=="disconnected") {
     if (to.meta.requiresToken  && !tokenStore.hasTokens) {

@@ -19,6 +19,14 @@
  *
  * 日志: 全部经页面 addLog 写入 IndexedDB 小时分块(LOG_CHUNK_PREFIX),
  * 与盐场同管道持久化, 事后可精确回溯定位问题。
+ *
+ * 结构自适应(2026-10-11): 实测 legion_getpayloadbf 响应顶层为 [info, roleBfState, legions],
+ * 船只/玩家真实字段名与预期不符导致"只记录模式"。现解析策略:
+ *  1) 先按已知命名字段匹配(cars/carDataMap/players/roles/...);
+ *  2) 未命中则对整棵响应树做形状深度扫描(船=carId/id+进度, 玩家=roleId/id+state/hp);
+ *  3) 仍不可识别时, 自动 payload_enterbf 进场后重取一次(部分数据需进场后才下发);
+ *  4) 彻底失败则输出递归结构图([结构图])并只记录, 等待人工校准字段名。
+ *  5) 玩家列表缺自身时用 roleBfState(自身实时态)兜底构造 self。
  */
 import { sleep } from "../helperTaskRunner.js";
 
@@ -79,7 +87,118 @@ function extractBattlefield(res, addLog, name) {
 }
 
 /**
- * 解析蟠桃船列表 (兼容多种字段命名), 返回列表+实际命中的字段名
+ * 形状判定: 是否像"船"对象 (有 carId, 或 id+进度) — 不依赖具体字段名
+ */
+function looksLikeShip(o) {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return false;
+  if ("roleId" in o) return false; // 玩家对象不算船
+  if (o.carId != null) return true;
+  return o.id != null && (o.progress != null || o.schedule != null);
+}
+
+/**
+ * 形状判定: 是否像"玩家"对象 (有 roleId, 或 id+state/hp)
+ */
+function looksLikePlayer(o) {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return false;
+  if (o.roleId != null) return true;
+  return o.id != null && ("state" in o || "hp" in o);
+}
+
+/**
+ * 深度扫描: 在响应对象树中查找"船/玩家"集合(数组或Map), 不依赖固定字段名。
+ * - 数组: 元素过半命中形状即视为集合
+ * - Map式对象: 子对象≥2个且过半命中形状才视为集合(防 roleBfState 等单对象误报)
+ * - 单对象兜底: 父键名强暗示(如 legions[i].car)时收集单个对象
+ * - 军团上下文: 集合嵌在 id 军团对象内(父键含 legion)时携带该军团 id
+ * 返回 [{ path, entries, legionCtx }], 按条目数排序由调用方处理
+ */
+function deepScanCollections(root, classify, singletonKeyRe = null) {
+  const hits = [];
+  const seen = new Set();
+  const walk = (node, path, parentKey, legionCtx, depth) => {
+    if (!node || typeof node !== "object" || depth > 6 || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      const objs = node.filter(
+        (x) => x && typeof x === "object" && !Array.isArray(x),
+      );
+      const matched = objs.filter(classify);
+      if (matched.length >= 1 && matched.length * 2 >= objs.length) {
+        hits.push({ path: path || "(root)", entries: matched, legionCtx });
+      }
+      node.forEach((x, i) =>
+        walk(x, `${path}[${i}]`, parentKey, legionCtx, depth + 1),
+      );
+      return;
+    }
+    const ctx =
+      legionCtx ?? (/legion/i.test(parentKey) && node.id != null ? node.id : null);
+    const pairs = Object.entries(node);
+    const objVals = pairs
+      .filter(([, v]) => v && typeof v === "object" && !Array.isArray(v))
+      .map(([, v]) => v);
+    if (objVals.length >= 2) {
+      const matched = objVals.filter(classify);
+      if (matched.length >= 2 && matched.length * 2 >= objVals.length) {
+        hits.push({ path: path || "(root)", entries: matched, legionCtx: ctx });
+      }
+    }
+    if (singletonKeyRe && singletonKeyRe.test(parentKey) && classify(node)) {
+      hits.push({ path: path || "(root)", entries: [node], legionCtx: ctx });
+    }
+    for (const [k, v] of pairs) {
+      walk(v, path ? `${path}.${k}` : k, k, ctx, depth + 1);
+    }
+  };
+  walk(root, "", "", null, 0);
+  return hits;
+}
+
+/** 船只条目归一化 (legionCtx: 集合所在军团的 id, 作 controlLegionId 兜底) */
+function normalizeShip(ship, legionCtx = null) {
+  return {
+    shipId: ship.carId ?? ship.id,
+    position: { x: ship.x ?? ship.position?.x ?? 0, y: ship.y ?? ship.position?.y ?? 0 },
+    progress: Number(ship.progress ?? ship.schedule ?? 0),
+    controlLegionId: Number(ship.legionId ?? ship.controlLegionId ?? legionCtx ?? 0),
+    hp: Number(ship.hp ?? 0),
+    maxHp: Number(ship.maxHp ?? ship.hp ?? 0),
+    defenders: ship.roleIds || ship.defenders || [],
+  };
+}
+
+/** 玩家条目归一化 (carIdOf: roleToCarId 映射查询, 可为空) */
+function normalizePlayer(p, carIdOf = null) {
+  const hasState = "state" in p || "roleState" in p;
+  const hasHp = "hp" in p || "curHp" in p;
+  const state = p.state ?? p.roleState ?? "";
+  const hp = Number(p.hp ?? p.curHp ?? 0);
+  const maxHp = Number(p.maxHp ?? p.maxhp ?? 0);
+  const sleepTime = Number(p.sleepTime ?? 0);
+  const roleId = Number(p.roleId ?? p.id);
+  const isDie = state === "die" || (!hasState && hasHp && hp <= 0);
+  const isWatching = state === "watching";
+  const carId = p.carId ?? (carIdOf ? carIdOf(roleId) : null);
+  return {
+    roleId,
+    legionId: Number(p.legionId ?? p.legionID ?? 0),
+    hp,
+    maxHp,
+    position: { x: p.x ?? p.position?.x ?? 0, y: p.y ?? p.position?.y ?? 0 },
+    carId,
+    isOnCar: p.isOnCar === true || carId != null,
+    state,
+    sleepTime,
+    isDie,
+    isWatching,
+    isDead: isDie || isWatching, // 兼容旧字段名
+  };
+}
+
+/**
+ * 解析蟠桃船列表: 先按已知命名字段(cars/carDataMap/...)匹配,
+ * 未命中则对整棵响应树做形状深度扫描, 返回列表+实际命中的字段名/路径
  * recognizable=false 表示结构完全未命中, 调用方应进入只记录模式, 不要盲动
  */
 export function parsePeachShips(bf) {
@@ -97,20 +216,29 @@ export function parsePeachShips(bf) {
       break;
     }
   }
-  if (!shipsRaw) return { ships: [], hitField, recognizable: false };
-  const list = Array.isArray(shipsRaw) ? shipsRaw : Object.values(shipsRaw);
-  const ships = list
-    .filter((ship) => ship && typeof ship === "object")
-    .map((ship) => ({
-      shipId: ship.carId ?? ship.id,
-      position: { x: ship.x ?? ship.position?.x ?? 0, y: ship.y ?? ship.position?.y ?? 0 },
-      progress: Number(ship.progress ?? ship.schedule ?? 0),
-      controlLegionId: Number(ship.legionId ?? ship.controlLegionId ?? 0),
-      hp: Number(ship.hp ?? 0),
-      maxHp: Number(ship.maxHp ?? ship.hp ?? 0),
-      defenders: ship.roleIds || ship.defenders || [],
-    }));
-  return { ships, hitField, recognizable: true };
+  if (shipsRaw) {
+    const list = Array.isArray(shipsRaw) ? shipsRaw : Object.values(shipsRaw);
+    return {
+      ships: list
+        .filter((ship) => ship && typeof ship === "object")
+        .map((ship) => normalizeShip(ship)),
+      hitField,
+      recognizable: true,
+    };
+  }
+  // 命名字段未命中 → 全树深度扫描兜底
+  const hits = deepScanCollections(bf, looksLikeShip, /^(car|cars|carList|carData|carDatas|carDataMap|carlist)$/i).sort(
+    (a, b) => b.entries.length - a.entries.length,
+  );
+  if (hits.length > 0) {
+    const best = hits[0];
+    return {
+      ships: best.entries.map((s) => normalizeShip(s, best.legionCtx)),
+      hitField: `deep:${best.path}`,
+      recognizable: true,
+    };
+  }
+  return { ships: [], hitField, recognizable: false };
 }
 
 /**
@@ -132,51 +260,41 @@ export function parsePlayers(bf) {
       break;
     }
   }
-  if (!playersRaw) return { players: [], hitField, recognizable: false };
-
-  // 官方模型用 roleToCarId(Map) 记录谁在哪艘船上
-  const roleToCarId = bf?.roleToCarId;
-  const carIdOf = (roleId) => {
-    if (roleToCarId && typeof roleToCarId.get === "function") {
-      const v =
-        roleToCarId.get(roleId) ??
-        roleToCarId.get(Number(roleId)) ??
-        roleToCarId.get(String(roleId));
-      if (v != null && v !== 0) return v;
-    }
-    return null;
-  };
-
-  const list = Array.isArray(playersRaw) ? playersRaw : Object.values(playersRaw);
-  const players = list
-    .filter((p) => p && typeof p === "object")
-    .map((p) => {
-      const hasState = "state" in p || "roleState" in p;
-      const hasHp = "hp" in p || "curHp" in p;
-      const state = p.state ?? p.roleState ?? "";
-      const hp = Number(p.hp ?? p.curHp ?? 0);
-      const maxHp = Number(p.maxHp ?? p.maxhp ?? 0);
-      const sleepTime = Number(p.sleepTime ?? 0);
-      const roleId = Number(p.roleId ?? p.id);
-      const isDie = state === "die" || (!hasState && hasHp && hp <= 0);
-      const isWatching = state === "watching";
-      const carId = p.carId ?? carIdOf(roleId);
-      return {
-        roleId,
-        legionId: Number(p.legionId ?? p.legionID ?? 0),
-        hp,
-        maxHp,
-        position: { x: p.x ?? p.position?.x ?? 0, y: p.y ?? p.position?.y ?? 0 },
-        carId,
-        isOnCar: p.isOnCar === true || carId != null,
-        state,
-        sleepTime,
-        isDie,
-        isWatching,
-        isDead: isDie || isWatching, // 兼容旧字段名
-      };
-    });
-  return { players, hitField, recognizable: true };
+  if (playersRaw) {
+    // 官方模型用 roleToCarId(Map) 记录谁在哪艘船上
+    const roleToCarId = bf?.roleToCarId;
+    const carIdOf = (roleId) => {
+      if (roleToCarId && typeof roleToCarId.get === "function") {
+        const v =
+          roleToCarId.get(roleId) ??
+          roleToCarId.get(Number(roleId)) ??
+          roleToCarId.get(String(roleId));
+        if (v != null && v !== 0) return v;
+      }
+      return null;
+    };
+    const list = Array.isArray(playersRaw) ? playersRaw : Object.values(playersRaw);
+    return {
+      players: list
+        .filter((p) => p && typeof p === "object")
+        .map((p) => normalizePlayer(p, carIdOf)),
+      hitField,
+      recognizable: true,
+    };
+  }
+  // 命名字段未命中 → 全树深度扫描兜底
+  const hits = deepScanCollections(bf, looksLikePlayer, /^(player|players|role|roles|roleList|roleMap)$/i).sort(
+    (a, b) => b.entries.length - a.entries.length,
+  );
+  if (hits.length > 0) {
+    const best = hits[0];
+    return {
+      players: best.entries.map((p) => normalizePlayer(p)),
+      hitField: `deep:${best.path}`,
+      recognizable: true,
+    };
+  }
+  return { players: [], hitField, recognizable: false };
 }
 
 /** 发送命令并等待响应, 记录命令与耗时; 失败抛出并记录 */
@@ -202,6 +320,44 @@ function summarizeResponse(res) {
   const keys = Object.keys(res).slice(0, 10);
   const codePart = res.code !== undefined ? `code=${res.code}` : "";
   return `${codePart} keys=[${keys.join(",")}]`.trim();
+}
+
+/**
+ * 递归生成响应结构图(路径=值/字段列表), 用于在结构未识别时校正字段名。
+ * 数组只展开首元素; 深度超限打印字段名列表。
+ */
+function describeStructure(value, maxDepth = 5) {
+  const lines = [];
+  const walk = (v, path, depth) => {
+    if (lines.length >= 60) return;
+    if (v == null || typeof v !== "object") {
+      const s = JSON.stringify(v) ?? "null";
+      lines.push(`${path}=${s.length > 50 ? `${s.slice(0, 50)}…` : s}`);
+      return;
+    }
+    if (depth >= maxDepth) {
+      const ks = Object.keys(v);
+      lines.push(`${path}{${ks.slice(0, 12).join(",")}${ks.length > 12 ? ",…" : ""}}`);
+      return;
+    }
+    if (Array.isArray(v)) {
+      if (v.length === 0) {
+        lines.push(`${path}[]`);
+        return;
+      }
+      lines.push(`${path}[${v.length}]`);
+      walk(v[0], `${path}[0]`, depth + 1);
+      return;
+    }
+    const ks = Object.keys(v);
+    if (ks.length === 0) {
+      lines.push(`${path}{}`);
+      return;
+    }
+    for (const k of ks) walk(v[k], path ? `${path}.${k}` : k, depth + 1);
+  };
+  walk(value, "", 0);
+  return lines;
 }
 
 /**
@@ -298,6 +454,8 @@ export async function runPeachBattle(options) {
   let marchOrder = null; // { shipId, at } 避免每轮重复行军
   let loopCount = 0;
   let probeDone = false; // 首样例探测是否已输出
+  let probeDumped = false; // 未识别时的结构图是否已输出(仅一次)
+  let enterProbeTried = false; // 是否已尝试"进场后重取"探测(仅一次)
   let selfMissingStreak = 0;
 
   // 服务器时间校准信息
@@ -311,6 +469,25 @@ export async function runPeachBattle(options) {
   const ping = (bfId) => {
     sendCmd(tokenStore, tokenId, "payload_ping", { bfId }, addLog, name).catch(() => {});
     lastPingAt = Date.now();
+  };
+
+  // 结构图输出(每次运行仅一次): 递归打印 raw 结构 + roleBfState/legions JSON, 供校正字段名
+  const dumpProbe = (rawBf, fullRes) => {
+    if (probeDumped) return;
+    probeDumped = true;
+    try {
+      console.log("[蟠桃] 战场完整响应(可在控制台 Copy object 反馈):", fullRes);
+      const lines = describeStructure(rawBf);
+      log(addLog, name, `[结构图] ${lines.join(" | ")}`.slice(0, 1800), "warning");
+      const rbs = fullRes?.roleBfState;
+      if (rbs != null) {
+        log(addLog, name, `[结构图] roleBfState=${JSON.stringify(rbs)?.slice(0, 500)}`, "warning");
+      }
+      const lg = fullRes?.legions;
+      if (lg != null) {
+        log(addLog, name, `[结构图] legions=${JSON.stringify(lg)?.slice(0, 600)}`, "warning");
+      }
+    } catch (_) { /* 诊断信息尽力而为, 失败不影响主流程 */ }
   };
 
   // roleId 缺失时从 role_getroleinfo 回退获取
@@ -353,7 +530,29 @@ export async function runPeachBattle(options) {
       // 2. 解析战场(防御式)
       const { ships, hitField: shipField, recognizable: shipsOk } = parsePeachShips(raw);
       const { players, hitField: playerField, recognizable: playersOk } = parsePlayers(raw);
-      const self = players.find((p) => p.roleId === rid) || null;
+      let self = players.find((p) => p.roleId === rid) || null;
+      // 兜底: 玩家列表未含自身时, 用 roleBfState(自身实时态)构造, 避免整场流程卡死
+      const rbs =
+        raw?.roleBfState && typeof raw.roleBfState === "object" ? raw.roleBfState : null;
+      if (!self && rbs && (rbs.state ?? rbs.roleState) != null) {
+        const st = String(rbs.state ?? rbs.roleState);
+        self = {
+          roleId: rid,
+          legionId: Number(rbs.legionId ?? 0),
+          hp: Number(rbs.hp ?? rbs.curHp ?? 0),
+          maxHp: Number(rbs.maxHp ?? rbs.maxhp ?? 0),
+          position: { x: rbs.x ?? rbs.position?.x ?? 0, y: rbs.y ?? rbs.position?.y ?? 0 },
+          carId: rbs.carId ?? null,
+          isOnCar: rbs.carId != null,
+          state: st,
+          sleepTime: Number(rbs.sleepTime ?? 0),
+          isDie: st === "die",
+          isWatching: st === "watching",
+          isDead: st === "die" || st === "watching",
+        };
+        log(addLog, name,
+          `[解析] 玩家列表未含自身, 已用 roleBfState 构造自身状态 (state=${st})`, "warning");
+      }
 
       // 首样例探测: 仅一次, 便于活动开启后核对字段名
       if (!probeDone) {
@@ -373,11 +572,41 @@ export async function runPeachBattle(options) {
         onBattlefieldUpdate({ ships, players, self, bfId, raw });
       }
 
-      // 3. 结构不可识别 → 只记录不盲动
+      // 3. 结构不可识别 → 先尝试进场(payload_enterbf)后重取(部分数据需进场后才下发),
+      //    仍失败则输出结构图并进入只记录模式, 不盲动
       if (!playersOk || !shipsOk) {
-        log(addLog, name,
-          `⚠ 战场结构未识别(玩家=${playerField || "无"} 船只=${shipField || "无"}), 进入只记录模式;` +
-          ` 请把首样例日志反馈以校正字段名`, "error");
+        if (!enterProbeTried) {
+          enterProbeTried = true;
+          log(addLog, name,
+            "[结构] 命名字段未命中, 尝试 payload_enterbf 进场后重新拉取战场数据...", "warning");
+          try {
+            await sendCmd(tokenStore, tokenId, "payload_enterbf", { bfId }, addLog, name);
+            await sleep(commandDelay);
+          } catch (_) { /* 进场失败不阻断, 仍重取一次看结构 */ }
+          try {
+            const res2 = await sendCmd(tokenStore, tokenId, "legion_getpayloadbf", {}, addLog, name);
+            const bf2 = extractBattlefield(res2, addLog, name);
+            if (bf2) {
+              const s2 = parsePeachShips(bf2.raw);
+              const p2 = parsePlayers(bf2.raw);
+              if (s2.recognizable && p2.recognizable) {
+                log(addLog, name,
+                  `[结构] 进场后识别成功: 船只=${s2.hitField}(${s2.ships.length}艘)` +
+                  ` 玩家=${p2.hitField}(${p2.players.length}人), 下一轮按正常流程执行`, "success");
+                await sleep(pollInterval);
+                continue;
+              }
+            }
+          } catch (_) { /* 重取失败走下方只记录模式 */ }
+          dumpProbe(raw, bfRes);
+        } else if (!probeDumped) {
+          dumpProbe(raw, bfRes);
+        }
+        if (loopCount % 10 === 1) {
+          log(addLog, name,
+            `⚠ 战场结构未识别(玩家=${playerField || "无"} 船只=${shipField || "无"}), 进入只记录模式;` +
+            ` 请把首样例日志反馈以校正字段名`, "error");
+        }
         await sleep(pollInterval);
         continue;
       }

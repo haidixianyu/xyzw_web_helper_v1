@@ -1073,8 +1073,12 @@ const filteredLogs = computed(() => {
   return visibleLogs;
 });
 
+let lastLogTs = 0; // 日志 ts 单调递增游标
 const addLog = (entry) => {
-  const e = { ts: Date.now(), ...entry };
+  // ts 必须唯一: 同一毫秒内连续多条日志若 ts 相同, 导出/恢复时按 ts 去重会误删
+  // (实测导致蟠桃 [解析]/[结构] 探测日志在导出文件中丢失), 故强制单调递增
+  lastLogTs = Math.max(lastLogTs + 1, Date.now());
+  const e = { ts: lastLogTs, ...entry };
   logs.value.push(e);
   unsentLogs.push(e);
   if (logs.value.length > MEM_WINDOW) {

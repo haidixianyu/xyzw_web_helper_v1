@@ -6,7 +6,7 @@
 let questionsData = null;
 let isLoading = false;
 
-const queryPromise = (async () => {
+const fetchQuestions = async () => {
   // Try loading from the app base URL first (supports Vite `base` config / GitHub Pages subpaths),
   // then fall back to common locations.
   const base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL)
@@ -54,7 +54,9 @@ const queryPromise = (async () => {
   isLoading = false;
   console.error("❌ 加载答题数据失败: 无法找到 answer.json（尝试了多个路径）");
   return [];
-})();
+};
+
+let queryPromise = fetchQuestions();
 
 /**
  * 异步加载答题数据
@@ -63,6 +65,64 @@ const queryPromise = (async () => {
 export async function loadQuestionsData() {
   return queryPromise;
 }
+
+/**
+ * 题库未命中的题目收集（用于后续补充题库）
+ */
+const unknownQuestions = new Set();
+
+/**
+ * 获取已收集的未命中题目列表
+ * @returns {string[]}
+ */
+export function getUnknownQuestions() {
+  return [...unknownQuestions];
+}
+
+/**
+ * 归一化题目文本：去空白、统一小写、去标点/引号/书名号等装饰符号
+ * 使「桃园三结义」与"桃园三结义"、全角/半角标点等差异不影响匹配
+ * @param {string} text
+ * @returns {string}
+ */
+export function normalizeQuestion(text) {
+  if (!text) return "";
+  return String(text)
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[，,、。．·？?！!：:；;（(）)「」『』“”"'‘’《》〈〉【】\[\]—\-～~]/g, "");
+}
+
+/**
+ * 字符二元组（bigram）相似度：衡量 b 被 a 覆盖的程度
+ * 用于兜底匹配题库中的错别字/措辞差异（如 马谩/马谡、荀或/荀彧）
+ * @returns {number} 0-1
+ */
+function bigramSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+
+  const grams = new Set();
+  for (let i = 0; i < a.length - 1; i++) {
+    grams.add(a.slice(i, i + 2));
+  }
+
+  let hit = 0;
+  const total = b.length - 1;
+  for (let i = 0; i < total; i++) {
+    if (grams.has(b.slice(i, i + 2))) {
+      hit++;
+    }
+  }
+
+  return total > 0 ? hit / total : 0;
+}
+
+// 相似度兜底阈值：单字错别字的题目相似度约0.9+，措辞相近但答案相反的题（如 闭月/羞花）约0.6，取0.75区分两者
+const SIMILARITY_THRESHOLD = 0.75;
+// 长度差超过该值的题目不做相似度匹配，避免误匹配
+const MAX_LENGTH_DIFF = 6;
 
 /**
  * 模糊匹配函数 - 查找题目中的关键词
@@ -74,12 +134,12 @@ export async function loadQuestionsData() {
 export function matchQuestion(questionFromDB, actualQuestion, threshold = 1) {
   if (!questionFromDB || !actualQuestion) return false;
 
+  const cleanDB = normalizeQuestion(questionFromDB);
+  const cleanActual = normalizeQuestion(actualQuestion);
+  if (!cleanDB || !cleanActual) return false;
+
   // 简单的包含匹配
   if (threshold === 1) {
-    // 去除空格和特殊字符进行匹配
-    const cleanDB = questionFromDB.replace(/\s+/g, "").toLowerCase();
-    const cleanActual = actualQuestion.replace(/\s+/g, "").toLowerCase();
-
     return cleanActual.includes(cleanDB) || cleanDB.includes(cleanActual);
   }
 
@@ -88,6 +148,7 @@ export function matchQuestion(questionFromDB, actualQuestion, threshold = 1) {
 
 /**
  * 查找题目答案
+ * 先精确包含匹配，未命中再用字符相似度兜底（容错题库错别字）
  * @param {string} question - 题目文本
  * @returns {Promise<number|null>} - 答案选项(1-4)，未找到返回null
  */
@@ -100,19 +161,48 @@ export async function findAnswer(question) {
       return null;
     }
 
-    // 遍历所有题目寻找匹配
+    const target = normalizeQuestion(question);
+    if (!target) return null;
+
+    // 第一轮：包含匹配
     for (let i = 0; i < questions.length; i++) {
       const item = questions[i];
       if (!item.name || !item.value) continue;
 
-      if (matchQuestion(item.name, question, 1)) {
-        // 降噪
+      // 降噪
+      const name = normalizeQuestion(item.name);
+      if (!name) continue;
+
+      if (target.includes(name) || name.includes(target)) {
         return item.value;
       }
     }
 
-    // 降噪
-    return null; // 未找到匹配的题目
+    // 第二轮：相似度兜底，处理题库与游戏文本的错别字/细微差异
+    let best = null;
+    let bestScore = 0;
+    for (let i = 0; i < questions.length; i++) {
+      const item = questions[i];
+      if (!item.name || !item.value) continue;
+
+      const name = normalizeQuestion(item.name);
+      if (!name) continue;
+      if (Math.abs(name.length - target.length) > MAX_LENGTH_DIFF) continue;
+
+      const score = bigramSimilarity(target, name);
+      if (score > bestScore) {
+        bestScore = score;
+        best = item;
+      }
+    }
+
+    if (best && bestScore >= SIMILARITY_THRESHOLD) {
+      return best.value;
+    }
+
+    // 记录未命中题目，便于后续补充题库
+    unknownQuestions.add(String(question).trim());
+    return null;
   } catch (error) {
     console.error("❌ 查找答案时出错:", error);
     return null;
@@ -146,5 +236,5 @@ export async function preloadQuestions() {
  */
 export function clearCache() {
   questionsData = null;
-  // 降噪
+  queryPromise = fetchQuestions();
 }

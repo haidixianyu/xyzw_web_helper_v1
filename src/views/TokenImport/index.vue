@@ -76,21 +76,12 @@
             <span>主线推关</span>
           </router-link>
           <router-link
-            to="/admin/message-test"
-            class="drawer-item"
-            @click="showConsoleDrawer = false"
-          >
-            <n-icon><ChatbubbleEllipsesSharp /></n-icon>
-            <span>消息测试</span>
-          </router-link>
-          <router-link
-            v-if="isNowInLegionWarTime()"
             to="/admin/legion-war"
             class="drawer-item"
             @click="showConsoleDrawer = false"
           >
             <n-icon><LockOpen /></n-icon>
-            <span>实时盐场</span>
+            <span>盐场监控</span>
           </router-link>
           <router-link
             to="/admin/profile"
@@ -828,7 +819,6 @@ import { useTokenStore, selectedTokenId } from "@/stores/tokenStore";
 import {
   Add,
   ArrowUpCircle,
-  ChatbubbleEllipsesSharp,
   CloudDownload,
   CloudUpload,
   Copy,
@@ -852,7 +842,6 @@ import {
   SyncCircle,
   TrashBin,
 } from "@vicons/ionicons5";
-import { isNowInLegionWarTime } from "@/utils/clubBattleUtils";
 import { NIcon, NAlert, useDialog, useMessage } from "naive-ui";
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";

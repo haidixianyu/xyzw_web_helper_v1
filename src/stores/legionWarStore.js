@@ -17,6 +17,7 @@ export const useLegionWarStore = defineStore("legionWar", () => {
   const legionDetails = ref({});
   const lastUpdateTime = ref("");
   const isJoined = ref(false); // 是否已进入战场
+  const connectedTokenId = ref(null); // 当前战场连接归属的账号
 
   // 引用计数，用于管理连接生命周期
   const subscriberCount = ref(0);
@@ -24,6 +25,30 @@ export const useLegionWarStore = defineStore("legionWar", () => {
 
   // WebSocket 实例
   let legionWarWebSocket = null;
+
+  // 与主连接一致: 存储的 token 可能是 base64/JSON 包装, 需解析出 actualToken 再拼 URL
+  const extractActualToken = (base64String) => {
+    try {
+      const clean = String(base64String || "")
+        .replace(/^data:.*base64,/, "")
+        .trim();
+      if (!clean) return "";
+      let decoded;
+      try {
+        decoded = atob(clean);
+      } catch {
+        decoded = clean;
+      }
+      try {
+        const data = JSON.parse(decoded);
+        return String(data.token || data.gameToken || decoded);
+      } catch {
+        return decoded;
+      }
+    } catch {
+      return "";
+    }
+  };
   // 消息提示实例（需要在组件中使用，这里先用 console 或者简单的 error throwing，或者在 action 中传入 message）
   // 由于 pinia 中不能直接使用 useMessage，我们可以在 action 中接收 message 对象，或者只抛出错误让组件处理
   // 但为了统一管理，简单的 toast 可以在这里处理，或者通过 global properties，或者不处理 UI 反馈只处理逻辑。
@@ -46,6 +71,14 @@ export const useLegionWarStore = defineStore("legionWar", () => {
       throw new Error("请先选择一个Token");
     }
 
+    const tokenId = tokenStore.selectedToken.id;
+
+    // 多账号: 现有连接属于别的账号时先断开, 否则会用旧账号的会话进战场/布阵,
+    // 服务器校验角色与连接不匹配直接报「客户端异常」
+    if (isConnected.value && connectedTokenId.value !== tokenId) {
+      performDisconnect();
+    }
+
     if (isConnected.value) {
       // 已经连接，如果还没进入战场（可能是之前的连接还在但状态不对），尝试重新进入
       if (!isJoined.value && !connecting.value) {
@@ -60,8 +93,6 @@ export const useLegionWarStore = defineStore("legionWar", () => {
 
     connecting.value = true;
     try {
-      const tokenId = tokenStore.selectedToken.id;
-
       // 1. 获取战场信息
       // 如果已经有 battlefieldId 且 token 没变，是否需要重新获取？
       // 为了安全起见，每次连接前重新获取 sid 和 battlefieldId
@@ -78,12 +109,12 @@ export const useLegionWarStore = defineStore("legionWar", () => {
 
       battlefieldId.value = getbattlefield.info.battlefieldId;
 
-      // 2. 构建 WS URL
+      // 2. 构建 WS URL(解析出 actualToken, 去掉重复的 sid2 参数)
+      const actualToken = extractActualToken(tokenStore.selectedToken.token);
       const baseWsUrl =
         "wss://xxz-xyzw-new.hortorgames.com/agent" +
-        `?p=${encodeURIComponent(tokenStore.selectedToken.token)}` +
-        `&e=x&sid2=${getbattlefield.info.sid}&lang=chinese` +
-        `&sid2=${getbattlefield.info.sid}`;
+        `?p=${encodeURIComponent(actualToken)}` +
+        `&e=x&sid2=${getbattlefield.info.sid}&lang=chinese`;
 
       // 3. 建立连接
       legionWarWebSocket = new XyzwLegionWarWebSocketClient({
@@ -97,6 +128,7 @@ export const useLegionWarStore = defineStore("legionWar", () => {
         console.log("战场WebSocket连接成功");
         isConnected.value = true;
         connecting.value = false;
+        connectedTokenId.value = tokenId;
 
         // 延迟发送进入战场指令
         setTimeout(() => {
@@ -207,6 +239,7 @@ export const useLegionWarStore = defineStore("legionWar", () => {
     isConnected.value = false;
     isJoined.value = false;
     connecting.value = false;
+    connectedTokenId.value = null;
     // validData.value = null; // 可选：是否清空数据
     battlefieldId.value = null;
     disconnectTimer = null;
