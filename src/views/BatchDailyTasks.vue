@@ -221,6 +221,7 @@
                   </template>
                 </n-button>
                 <n-button
+                  v-if="false"
                   size="small"
                   type="warning"
                   ghost
@@ -236,6 +237,7 @@
                   </template>
                 </n-button>
                 <n-button
+                  v-if="false"
                   size="small"
                   type="info"
                   ghost
@@ -266,6 +268,22 @@
                   </template>
                 </n-button>
                 <n-button
+                  size="small"
+                  type="info"
+                  ghost
+                  :loading="arenaInfoLoading"
+                  :disabled="arenaInfoLoading || isRunning || selectedTokens.length === 0"
+                  @click="fetchArenaInfo"
+                >
+                  竞技场信息
+                  <template #icon v-if="arenaInfoLoading">
+                    <n-icon style="margin-left: 4px;">
+                      <Refresh />
+                    </n-icon>
+                  </template>
+                </n-button>
+                <n-button
+                  v-if="false"
                   size="small"
                   type="warning"
                   ghost
@@ -543,9 +561,9 @@
           <n-tabs type="line" animated>
             <n-tab-pane name="quickDaily" tab="每日">
               <n-space vertical>
-                <!-- 挂机 -->
+                <!-- 常规 -->
                 <n-space size="small" align="center" wrap>
-                  <span class="batch-group-label">挂机</span>
+                  <span class="batch-group-label">常规</span>
                   <n-button
                     size="small"
                     @click="claimHangUpRewards"
@@ -569,11 +587,6 @@
                   >
                     一键加钟
                   </n-button>
-                </n-space>
-
-                <!-- 罐子与闯关 -->
-                <n-space size="small" align="center" wrap>
-                  <span class="batch-group-label">罐子·闯关</span>
                   <n-button
                     size="small"
                     @click="resetBottles"
@@ -581,6 +594,18 @@
                   >
                     重置罐子
                   </n-button>
+                  <n-button
+                    size="small"
+                    @click="batchLegacyClaim"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    功法券领取
+                  </n-button>
+                </n-space>
+
+                <!-- 闯关与临时玩法 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">闯关·临时</span>
                   <n-button
                     size="small"
                     @click="skinChallenge"
@@ -594,13 +619,6 @@
                     :disabled="isRunning || selectedTokens.length === 0"
                   >
                     领取闯关奖励
-                  </n-button>
-                  <n-button
-                    size="small"
-                    @click="batchLegacyClaim"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                  >
-                    功法券领取
                   </n-button>
                   <n-popselect
                     :value="campChallengeMode"
@@ -621,6 +639,13 @@
                     :disabled="isRunning || selectedTokens.length === 0"
                   >
                     比赛预约
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="openTiangongCheerModal"
+                  >
+                    天宫助威
                   </n-button>
                 </n-space>
 
@@ -1399,6 +1424,7 @@
                             :key="partIndex"
                             class="log-table-part"
                             :title="part.title || part.text || ''"
+                            :style="cellColorStyle(part)"
                           >
                             <img
                               v-if="part.icon"
@@ -1409,7 +1435,11 @@
                             <span>{{ part.text }}</span>
                           </span>
                         </span>
-                        <span v-else-if="cell && typeof cell === 'object'" class="log-table-cell">
+                        <span
+                          v-else-if="cell && typeof cell === 'object'"
+                          class="log-table-cell"
+                          :style="cellColorStyle(cell)"
+                        >
                           <img
                             v-if="cell.icon"
                             :src="cell.icon"
@@ -1686,6 +1716,102 @@
           >
             开始购买({{ charmBuySelection.length }}种×{{ charmBuyNum }}张)
           </n-button>
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- 天宫助威：选择助威对象 -->
+    <n-modal
+      v-model:show="showTiangongCheerModal"
+      preset="card"
+      title="天宫助威 - 选择助威对象"
+      style="width: 95%; max-width: 640px"
+      :auto-focus="false"
+    >
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+          <span>
+            <template v-if="tiangongSelectedName">
+              已选择"<span style="font-weight: 600">{{ tiangongSelectedName }}</span
+              >"
+            </template>
+            <template v-else> 对选中账号助威（{{ selectedTokens.length }} 个） </template>
+            <n-tag v-if="tiangongPhase" size="small" type="info" style="margin-left: 4px">
+              期号 {{ tiangongPhase }}
+            </n-tag>
+          </span>
+          <n-input
+            v-model:value="tiangongManualPhase"
+            size="small"
+            placeholder="期号(如261016)，留空自动探测"
+            style="width: 200px; margin-left: auto"
+            @keyup.enter="loadTiangongCheerList"
+          />
+          <n-button
+            size="small"
+            :loading="tiangongLoading"
+            @click="loadTiangongCheerList"
+          >
+            刷新名单
+          </n-button>
+        </div>
+
+        <div v-if="tiangongLoading" class="tiangong-loading">
+          正在拉取可助威名单…
+        </div>
+        <n-alert v-else-if="tiangongError" type="error" :show-icon="true">
+          {{ tiangongError }}
+        </n-alert>
+        <n-radio-group
+          v-else
+          v-model:value="tiangongSelectedLegionId"
+          style="width: 100%"
+        >
+          <div class="tiangong-candidate-list">
+            <label
+              v-for="row in tiangongCandidates"
+              :key="row.legionId"
+              class="tiangong-candidate"
+              :class="{
+                active: tiangongSelectedLegionId === row.legionId,
+              }"
+            >
+              <n-radio :value="row.legionId" />
+              <div class="tiangong-candidate-main">
+                <span class="tiangong-candidate-name" :title="row.name">
+                  {{ row.name }}
+                </span>
+                <span class="tiangong-candidate-tags">
+                  <n-tag size="small" type="info">
+                    天宫 No.{{ row.goldenRank || "?" }}
+                  </n-tag>
+                  <n-tag size="small">服{{ row.serverId }}</n-tag>
+                  <n-tag size="small" type="warning">
+                    {{ formatPower(row.power) }}
+                  </n-tag>
+                  <n-tag size="small" :bordered="false">
+                    {{ row.goldenScore }}分·胜{{ row.sOWinCnt }}
+                  </n-tag>
+                  <n-tag size="small" :bordered="false">
+                    第{{ row.groupId }}场·{{ row.side }}
+                  </n-tag>
+                </span>
+              </div>
+            </label>
+          </div>
+        </n-radio-group>
+
+        <div style="text-align: right">
+          <n-space justify="end">
+            <n-button @click="showTiangongCheerModal = false">取消</n-button>
+            <n-button
+              type="primary"
+              :disabled="!tiangongSelectedLegionId || tiangongLoading"
+              @click="confirmTiangongCheer"
+            >
+              确认助威({{ selectedTokens.length }}个账号)
+            </n-button>
+          </n-space>
         </div>
       </div>
     </n-modal>
@@ -3975,6 +4101,7 @@ import {
   createTasksLegacy,
   createTasksFootball,
   createTasksApex,
+  createTasksSaltroad,
   createTasksShidian,
   createTasksCampChallenge,
   createTasksXuanwuBlessing,
@@ -8373,6 +8500,15 @@ watch(autoScrollLog, (newValue) => {
   }
 });
 
+// 日志表格单元格/分段的着色：{color, bold} 为可选字段，配合既有 {text, icon, parts} 结构
+const cellColorStyle = (o) =>
+  o?.color || o?.bold
+    ? {
+        color: o.color || undefined,
+        fontWeight: o.bold ? "600" : undefined,
+      }
+    : undefined;
+
 const copyLogs = () => {
   if (logs.value.length === 0) {
     message.warning("没有可复制的日志");
@@ -8939,6 +9075,165 @@ const starWeekInfo = () => {
 const pickStarCount = (extParam) => {
   const star = Number(extParam?.[`nmExtStarCnt_${starWeekInfo().key}`]);
   return Number.isFinite(star) ? star : 0;
+};
+
+// 竞技场信息：积分/名次（arena_getarearank.myRank）+ 当日战斗次数
+// 注意查询顺序：arena_startarea/arena_getbattlerecord 有报名副作用（会把账号塞进
+// 竞技场队伍），故先只读排行榜查名次；未上榜（本周未参战）则不再调用后续命令
+const arenaInfoLoading = ref(false);
+
+const fmtArenaScore = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? String(Math.round(n)) : "-";
+};
+
+// 北京时间（UTC+8）今日0点的秒级时间戳
+const bjMidnightSec = () => {
+  const bjNow = Math.floor(Date.now() / 1000) + 8 * 3600;
+  return Math.floor(bjNow / 86400) * 86400 - 8 * 3600;
+};
+
+const buildArenaInfoTable = (rows, failCount) => ({
+  header: `竞技场信息　|　账号 ${rows.length} 个${failCount > 0 ? `　|　失败 ${failCount} 个` : ""}`,
+  columns: ["账号", "积分", "名次", "当日挑战", "当日防守", "当日战绩"],
+  rows: rows.map((r) => [
+    r.name,
+    r.score,
+    r.rankCell,
+    r.attackCnt,
+    r.defendCnt,
+    `${r.winCnt}胜${r.loseCnt}负`,
+  ]),
+});
+
+const fetchArenaInfo = async () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择要查询的账号");
+    return;
+  }
+
+  const targetIds = [...selectedTokens.value];
+  arenaInfoLoading.value = true;
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 开始查询竞技场信息(${targetIds.length}个账号) ===`,
+    type: "info",
+  });
+
+  const rows = [];
+  let failCount = 0;
+
+  for (const tokenId of targetIds) {
+    if (shouldStop.value) break;
+    const token = tokens.value.find((t) => t.id === tokenId);
+    const name = token ? token.name : tokenId;
+    try {
+      await ensureConnection(tokenId);
+
+      // 1. 先查实时名次（仅读排行榜，无报名副作用）
+      const rankRes = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "arena_getarearank",
+        { rankType: 0, minRank: 1, maxRank: 1 },
+        8000,
+      );
+      const myRank = rankRes?.myRank || {};
+      const rank = Number(myRank.rank) || 0;
+      const total = rankRes?.total ?? "-";
+
+      if (!rank) {
+        // 本周还未战斗（-/-）：跳过后续竞技场查询，避免 startarea/battlerecord
+        // 的报名副作用把账号塞进竞技场队伍
+        rows.push({
+          name,
+          score: "-",
+          rankCell: {
+            text: "-/-",
+            color: "#f0a020",
+            bold: true,
+            title: "本周还未战斗",
+          },
+          attackCnt: 0,
+          defendCnt: 0,
+          winCnt: 0,
+          loseCnt: 0,
+        });
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${name} 竞技场: 本周还未战斗（-/-），跳过后续查询以免误报名`,
+          type: "info",
+        });
+        return;
+      }
+
+      // 2. 当日结算点（已参战账号查询安全）：服务端时间戳可能滞后一天，
+      //    与北京时间今日0点兜底取较晚者
+      const areaRes = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "arena_startarea",
+        {},
+        8000,
+      );
+      const dayStartSec = Math.max(
+        Number(areaRes?.areaArena?.dailySettlementStamp) || 0,
+        bjMidnightSec(),
+      );
+
+      // 3. 当日战斗次数：created >= 当日边界即当日
+      const recRes = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "arena_getbattlerecord",
+        {},
+        8000,
+      );
+      const records = Array.isArray(recRes?.list) ? recRes.list : [];
+      const today = records.filter((r) => Number(r.created) >= dayStartSec);
+      const attackCnt = today.filter((r) => r.isAttack).length;
+      const defendCnt = today.filter((r) => !r.isAttack).length;
+      const winCnt = today.filter((r) => r.isWin).length;
+
+      rows.push({
+        name,
+        score: fmtArenaScore(myRank.score),
+        rankCell: `${rank}/${total}`,
+        attackCnt,
+        defendCnt,
+        winCnt,
+        loseCnt: today.length - winCnt,
+      });
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${name} 竞技场: 积分 ${fmtArenaScore(myRank.score)}，名次 ${rank}/${total}，当日挑战 ${attackCnt} / 防守 ${defendCnt}`,
+        type: "info",
+      });
+    } catch (e) {
+      failCount++;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${name} 竞技场信息查询失败: ${e?.message || e}`,
+        type: "warning",
+      });
+    } finally {
+      tokenStore.closeWebSocketConnection(tokenId);
+      releaseConnectionSlot();
+    }
+  }
+
+  if (rows.length > 0) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `【竞技场信息】${rows.length} 个账号`,
+      type: "success",
+      table: buildArenaInfoTable(rows, failCount),
+    });
+  }
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 竞技场信息查询完成: 成功 ${rows.length}，失败 ${failCount} ===`,
+    type: "info",
+  });
+  message.success(`竞技场信息查询完成: 成功 ${rows.length}，失败 ${failCount}`);
+  arenaInfoLoading.value = false;
 };
 
 // 把单支队伍的成员整理成日志内可渲染的表格（队长用图标前缀区分，未录入星数用 ⚠️ 标记）
@@ -9644,6 +9939,76 @@ const startCharmBuy = () => {
   );
 };
 
+// 天宫助威：选中账号后弹出对话框，拉取可助威军团名单，选定目标后批量助威
+const showTiangongCheerModal = ref(false);
+const tiangongLoading = ref(false);
+const tiangongCandidates = ref([]);
+const tiangongSelectedLegionId = ref(null);
+const tiangongPhase = ref("");
+const tiangongManualPhase = ref("");
+const tiangongError = ref("");
+
+const tasksSaltroad = createTasksSaltroad(createTaskDeps());
+const { fetchSaltroadCheerCandidates, batchSaltroadCheer } = tasksSaltroad;
+
+// 选中助威对象后，弹窗顶部显示 已选择"xxx"
+const tiangongSelectedName = computed(() => {
+  const target = tiangongCandidates.value.find(
+    (c) => c.legionId === tiangongSelectedLegionId.value,
+  );
+  return target?.name || "";
+});
+
+const openTiangongCheerModal = () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择账号");
+    return;
+  }
+  showTiangongCheerModal.value = true;
+  if (tiangongCandidates.value.length === 0) {
+    loadTiangongCheerList();
+  }
+};
+
+const loadTiangongCheerList = async () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择账号");
+    return;
+  }
+  tiangongLoading.value = true;
+  tiangongError.value = "";
+  tiangongSelectedLegionId.value = null;
+  try {
+    const res = await fetchSaltroadCheerCandidates(tiangongManualPhase.value.trim());
+    tiangongCandidates.value = res.candidates || [];
+    tiangongPhase.value = res.phase || "";
+    if (!res.candidates?.length) {
+      tiangongError.value = res.reason || "未拉取到可助威名单";
+    }
+  } catch (e) {
+    console.error("拉取天宫助威名单失败:", e);
+    tiangongError.value = e?.message || "拉取失败";
+  } finally {
+    tiangongLoading.value = false;
+  }
+};
+
+const confirmTiangongCheer = () => {
+  const target = tiangongCandidates.value.find(
+    (c) => c.legionId === tiangongSelectedLegionId.value,
+  );
+  if (!target) {
+    message.warning("请先选择助威对象");
+    return;
+  }
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择账号");
+    return;
+  }
+  showTiangongCheerModal.value = false;
+  batchSaltroadCheer(target, tiangongPhase.value);
+};
+
 const refreshBattleVersion = async (tokenId) => {
   const res = await tokenStore.sendMessageWithPromise(
     tokenId,
@@ -10234,6 +10599,58 @@ const stopBatch = () => {
   background: var(--n-color, rgba(32, 128, 240, 0.1));
   border-radius: 4px;
   white-space: nowrap;
+}
+
+/* 天宫助威候选名单 */
+.tiangong-loading {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #999;
+}
+.tiangong-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.tiangong-candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e6;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
+}
+.tiangong-candidate:hover {
+  border-color: #2080f0;
+}
+.tiangong-candidate.active {
+  border-color: #2080f0;
+  background: rgba(32, 128, 240, 0.06);
+}
+.tiangong-candidate-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.tiangong-candidate-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tiangong-candidate-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .batch-inline-label {

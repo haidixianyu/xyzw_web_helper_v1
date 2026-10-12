@@ -55,6 +55,7 @@ const errorCodeMap = {
   4800040: "俱乐部没有报名",
   2100010: "活动未开放",
   11800010: "怪异寻宝暂无可领取的奖励（未达新档位或已领完）",
+  2300080: "本轮已助威过，不可重复助威",
 };
 
 // 事件节流定义表，根据实际需要调整命令和节流时间
@@ -524,7 +525,20 @@ export function registerDefaultCommands(reg) {
     .register("apex_getvotelist", { groupId: 1, idx: 0, round: 1 })
     .register("apex_vote", { teamId: "", round: 1, voteCnt: 1 })
     .register("apex_taskclaim", { confId: 0 })
-    .register("apex_get64oppomap", { scheduleId: 0, groupId: 0 });
+    .register("apex_get64oppomap", { scheduleId: 0, groupId: 0 })
+
+    // 天宫助威（赛季瑞士轮军团对阵助威）
+    // 2026-10-12 抓包: saltroad_getoutopponent params {"phase":"261016"}（YYMMDD 期号）
+    // 助威结果通过 syncresp(role.statistics["sr:out:cheer:*"]) 返回（无独立应答包，同 pkroom_appoint）
+    .register("saltroad_getoutopponent", { phase: "" })
+    .register("saltroad_getseasonoutrank")
+    .register("saltroad_outcheer", { legionId: 0 })
+
+    // 竞技场信息（盐场分段赛区）
+    // 2026-10-12 抓包: myRank 含 rank/score；battlerecord 按 created>=dailySettlementStamp 算当日
+    .register("arena_startarea")
+    .register("arena_getarearank", { rankType: 0, minRank: 1, maxRank: 1 })
+    .register("arena_getbattlerecord");
   registry.commands.set(
     "fight_startareaarena",
     (ack = 0, seq = 0, params = {}) => {
@@ -1266,6 +1280,9 @@ export class XyzwWebSocketClient {
       legion_claimpayloadtaskprogressresp: "legion_claimpayloadtaskprogress",
       saltroad_getwartyperesp: "saltroad_getwartype",
       saltroad_getsaltroadwartotalrankresp: "saltroad_getsaltroadwartotalrank",
+      saltroad_getoutopponentresp: "saltroad_getoutopponent",
+      saltroad_getseasonoutrankresp: "saltroad_getseasonoutrank",
+      saltroad_outcheerresp: "saltroad_outcheer",
       warguess_getrankresp: "warguess_getrank",
       warguess_startguessresp: "warguess_startguess",
       warguess_getguesscoinrewardresp: "warguess_getguesscoinreward",
