@@ -1,9 +1,46 @@
 import { workerSleep } from "../workerTimer.js";
+import { $emit } from "../../stores/events/index";
 
 /**
  * 挂机、答题、签到类任务
  * 包含: claimHangUpRewards, batchAddHangUpTime, batchStudy, batchclubsign
  */
+
+// ===== 本地答题完成记录（每周一0点自动过期）=====
+const STUDY_RECORD_KEY = "batchStudyCompletionRecord";
+
+// 本周一 0 点的时间戳（周一为一周开始）
+const getWeekStartTime = () => {
+  const d = new Date();
+  const day = d.getDay(); // 0=周日
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+const readStudyRecord = () => {
+  try {
+    return JSON.parse(localStorage.getItem(STUDY_RECORD_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+
+// 本周是否已完成答题并领取奖励
+const isStudyCompletedThisWeek = (tokenId) => {
+  return readStudyRecord()[tokenId] === getWeekStartTime();
+};
+
+// 记录本周已完成（值为所在周的周一0点，跨周自动失效）
+const markStudyCompletedThisWeek = (tokenId) => {
+  try {
+    const record = readStudyRecord();
+    record[tokenId] = getWeekStartTime();
+    localStorage.setItem(STUDY_RECORD_KEY, JSON.stringify(record));
+  } catch {
+    /* 忽略存储异常 */
+  }
+};
 
 /**
  * 创建挂机、答题、签到类任务执行器
@@ -26,6 +63,7 @@ export function createTasksHangUp(deps) {
     message,
     currentRunningTokenId,
     hangUpAddTimes,
+    cdkCode,
   } = deps;
 
   /**
@@ -232,6 +270,17 @@ export function createTasksHangUp(deps) {
 
       const token = tokens.value.find((t) => t.id === tokenId);
 
+      // 本地记录：本周已完成答题并领取奖励 → 直接跳过（不建连）
+      if (isStudyCompletedThisWeek(tokenId)) {
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 本周答题已完成，跳过 ===`,
+          type: "success",
+        });
+        return;
+      }
+
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -240,6 +289,53 @@ export function createTasksHangUp(deps) {
         });
 
         await ensureConnection(tokenId);
+
+        // 兜底判断（per-token 响应，不受并发覆盖影响）：
+        // 服务器数据显示本周已答满10题（beginTime 在本周一0点后）→ 补领奖励后跳过
+        try {
+          const roleRes = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "role_getroleinfo",
+            {},
+            5000,
+          );
+          const study = roleRes?.role?.study;
+          if (
+            study &&
+            study.maxCorrectNum >= 10 &&
+            study.beginTime * 1000 >= getWeekStartTime()
+          ) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 本周答题已完成（服务器确认），补领奖励后跳过`,
+              type: "info",
+            });
+            for (let rewardId = 1; rewardId <= 10; rewardId++) {
+              try {
+                tokenStore.sendMessage(tokenId, "study_claimreward", {
+                  rewardId,
+                });
+              } catch {
+                /* 忽略单个领奖失败 */
+              }
+              await workerSleep(200);
+            }
+            markStudyCompletedThisWeek(tokenId);
+            tokenStatus.value[tokenId] = "completed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `=== ${token.name} 本周答题已完成，跳过 ===`,
+              type: "success",
+            });
+            return;
+          }
+        } catch (roleErr) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 查询答题状态失败，继续尝试答题: ${roleErr.message}`,
+            type: "warning",
+          });
+        }
 
         // Reset local study status
         tokenStore.gameData.studyStatus = {
@@ -293,6 +389,8 @@ export function createTasksHangUp(deps) {
         }
 
         if (completed) {
+          // 答题+领奖流程全部走完，记录本周已完成（下次直接跳过）
+          markStudyCompletedThisWeek(tokenId);
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -401,6 +499,198 @@ export function createTasksHangUp(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("批量俱乐部签到结束");
+  };
+
+  /**
+   * 批量兑换码
+   * system_claimcdkreward {key, platformType:"h5web"}，响应为 syncrewardresp
+   * 实测（2026-10-17）：人工连接 52ms 秒回；重复兑换时服务器静默不回包（奖励此前已发）；
+   * cdk 已兑换标记只出现在 syncrewardresp 增量同步里，role_getroleinfo 全量可能查不到，
+   * 故用 $emit 监听 syncrewardresp 广播 + 本地提交记录双重兜底
+   */
+  // 奖励 itemId → 中文名（未收录的显示原始 id）
+  const CDK_ITEM_NAMES = {
+    1001: "招募令",
+    1003: "进阶石",
+    1006: "精铁",
+    1013: "珍珠",
+    1014: "军团币",
+    1016: "晶石",
+    1021: "扫荡魔毯",
+    1022: "白玉",
+    1023: "彩玉",
+    2001: "木制宝箱",
+    2002: "青铜宝箱",
+    2003: "黄金宝箱",
+    2004: "铂金宝箱",
+    2005: "钻石宝箱",
+    3001: "金币袋子",
+    3002: "金砖袋子",
+    3011: "白玉袋子",
+    37001: "怪异塔钥匙",
+  };
+  const batchClaimCdk = async () => {
+    if (selectedTokens.value.length === 0) return;
+    const code = (cdkCode?.value || "").trim();
+    if (!code) {
+      message.warning("请输入兑换码");
+      return;
+    }
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始兑换码: ${token.name} (${code}) ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+        if (shouldStop.value) return;
+
+        // 本地提交记录：同一兑换码此前已提交过的账号，重跑时服务器会静默
+        let priorTs = null;
+        let record = {};
+        try {
+          record = JSON.parse(
+            localStorage.getItem("batchCdkClaimRecord") || "{}",
+          );
+          priorTs = record[code]?.[tokenId] || null;
+        } catch {
+          /* 忽略 */
+        }
+        try {
+          record[code] = record[code] || {};
+          record[code][tokenId] = Date.now();
+          localStorage.setItem("batchCdkClaimRecord", JSON.stringify(record));
+        } catch {
+          /* 忽略 */
+        }
+
+        // 监听 syncrewardresp 广播（不依赖 promise 匹配链路），按 tokenId 过滤
+        let syncreward = null;
+        const listener = (session) => {
+          if (session?.tokenId !== tokenId) return;
+          const body = session?.body ?? session;
+          if (body?.reward || body?.statistics) syncreward = body;
+        };
+        $emit.on("syncrewardresp", listener);
+
+        try {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "system_claimcdkreward",
+            { key: code, platformType: "h5web" },
+            5000,
+          ).catch(() => {});
+          // 人工实测 52ms 回包，给足 3 秒广播窗口
+          await workerSleep(3000);
+        } finally {
+          $emit.off("syncrewardresp", listener);
+        }
+
+        // 成功路径1：syncrewardresp 带 reward 数组 [{type,itemId,value}]
+        const rewards = Array.isArray(syncreward?.reward)
+          ? syncreward.reward
+          : [];
+        if (rewards.length > 0) {
+          const rewardText = rewards
+            .map((r) => `${CDK_ITEM_NAMES[r.itemId] || r.itemId}×${r.value}`)
+            .join(", ");
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 兑换成功: ${rewardText}`,
+            type: "success",
+          });
+          return;
+        }
+
+        // 成功路径2：syncrewardresp 带 statistics 的 cdk 标记（此前已兑换的重放同步）
+        const statKey = `cdk:${code}_0`;
+        if (syncreward?.statistics && syncreward.statistics[statKey]) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已兑换过该码（标记确认）`,
+            type: "success",
+          });
+          return;
+        }
+
+        // 成功路径3（兜底）：role_getroleinfo 全量里若含 cdk 标记
+        try {
+          const roleRes = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "role_getroleinfo",
+            {},
+            5000,
+          );
+          if (
+            roleRes?.role?.statistics &&
+            roleRes.role.statistics[statKey] !== undefined
+          ) {
+            tokenStatus.value[tokenId] = "completed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 已兑换过该码（角色数据确认）`,
+              type: "success",
+            });
+            return;
+          }
+        } catch (e) {
+          /* 确认查询失败按未确认处理 */
+        }
+
+        if (priorTs) {
+          // 此前提交过且服务器静默 → 大概率已兑换成功，不标 failed 挡批量
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 兑换请求已提交，服务器未回包（重复兑换时服务器静默，此前 ${new Date(priorTs).toLocaleTimeString()} 已提交过），请游戏内核对奖励`,
+            type: "warning",
+          });
+        } else {
+          tokenStatus.value[tokenId] = "failed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 兑换码未确认成功（服务器无响应，请人工核对该账号）`,
+            type: "error",
+          });
+        }
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 兑换码失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量兑换码结束");
   };
 
   /**
@@ -566,6 +856,7 @@ export function createTasksHangUp(deps) {
     batchAddHangUpTime,
     batchStudy,
     batchclubsign,
+    batchClaimCdk,
     batchWarGuessCheer,
   };
 }

@@ -1,4 +1,4 @@
-import { getTowerActId } from "../towerActId.js";
+import { getTowerActCandidates } from "../towerActId.js";
 import { workerSleep } from "../workerTimer.js";
 
 /**
@@ -1081,28 +1081,44 @@ export function createTasksTower(deps) {
         // 先发送 role_getroleinfo 以携带最新 clientVersion 建立会话
         await tokenStore.sendGetRoleInfo(tokenId).catch(() => {});
 
-        // 根据当前日期计算 actId（本周周五 YYMMDD + 活动序号1）
-        const computeActId = () => {
-          const now = new Date();
-          const dayOfWeek = now.getDay(); // 0=Sun, 5=Fri, 6=Sat
-          const daysToFriday = (dayOfWeek - 5 + 7) % 7;
-          const friday = new Date(now);
-          friday.setDate(now.getDate() - daysToFriday);
-          const yy = String(friday.getFullYear()).slice(2);
-          const mm = String(friday.getMonth() + 1).padStart(2, '0');
-          const dd = String(friday.getDate()).padStart(2, '0');
-          return Number(`${yy}${mm}${dd}1`);
+        // 探测本周真实 actId：活动后缀随周期递增（历史 1、2，当前 3），不能硬编码，
+        // 逐个 towers_getinfo 试探，第一个返回有效数据的即为本周期 actId
+        const resolveActId = async () => {
+          for (const candidate of getTowerActCandidates()) {
+            try {
+              const info = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "towers_getinfo",
+                { actId: candidate },
+                3000,
+              );
+              const data = info?.actId
+                ? info
+                : info?.towerData?.actId
+                  ? info.towerData
+                  : null;
+              if (data?.actId) return data.actId;
+            } catch (e) {
+              // 该后缀无活动，尝试下一个
+            }
+          }
+          throw new Error("未探测到本周换皮闯关活动 actId");
         };
-        const computedActId = computeActId();
 
-        // 获取活动信息（请求带 actId）
+        const actId = await resolveActId();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 探测到活动 actId=${actId}`,
+          type: "info",
+        });
+
         let res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "towers_getinfo",
-          { actId: getTowerActId() },
+          { actId },
           5000
         );
-        
+
         let towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
 
 
@@ -1111,14 +1127,12 @@ export function createTasksTower(deps) {
         if (!towerData.actId) {
            addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 换皮闯关活动信息获取失败 (computedActId=${computedActId})`,
+            message: `${token.name} 换皮闯关活动信息获取失败 (actId=${actId})`,
             type: "warning",
           });
           tokenStatus.value[tokenId] = "failed";
           return;
         }
-
-        const actId = towerData.actId;
         const actIdStr = String(actId);
         if (actIdStr.length >= 6) {
            const year = "20" + actIdStr.substring(0, 2);
@@ -1206,18 +1220,20 @@ export function createTasksTower(deps) {
 
             while (loop && !shouldStop.value) {
                 if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: getTowerActId(), towerType: type }, 5000);
+                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId, towerType: type }, 5000);
                     // 稍微等待一下
                     await workerSleep(500);
                 }
 
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: getTowerActId(), towerType: type }, 5000);
-                const battleData = fightRes?.battleData;
-                const curHP = battleData?.result?.accept?.ext?.curHP;
-                
+                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId, towerType: type }, 5000);
+                // 胜利判断：日志实测响应结构为 battleData.result.isWin，
+                // 兜底旧结构 result.accept.ext.curHP（0=胜）
+                const fightResult = fightRes?.battleData?.result;
+                const isWin = fightResult?.isWin ?? fightResult?.accept?.ext?.curHP === 0;
+
                 const currentLevel = getTowerLevel(type);
 
-                if (curHP === 0) {
+                if (isWin) {
                      addLog({
                         time: new Date().toLocaleTimeString(),
                         message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战成功`,
@@ -1228,7 +1244,7 @@ export function createTasksTower(deps) {
                      failCount = 0;
 
                      // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: getTowerActId() }, 5000);
+                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId }, 5000);
                      towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
 
                      if (isTowerCleared(type)) {
@@ -1330,7 +1346,41 @@ export function createTasksTower(deps) {
 
         await ensureConnection(tokenId);
         await tokenStore.sendGetRoleInfo(tokenId).catch(() => {});
-        await claimTowerRewards(tokenId, token);
+
+        // 探测本周真实 actId 后再领奖（与闯关同一探测逻辑）
+        const resolvedActId = await (async () => {
+          for (const candidate of getTowerActCandidates()) {
+            try {
+              const info = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "towers_getinfo",
+                { actId: candidate },
+                3000,
+              );
+              const data = info?.actId
+                ? info
+                : info?.towerData?.actId
+                  ? info.towerData
+                  : null;
+              if (data?.actId) return data.actId;
+            } catch (e) {
+              // 该后缀无活动，尝试下一个
+            }
+          }
+          return null;
+        })();
+
+        if (!resolvedActId) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 未探测到本周换皮闯关活动，可能已结束`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        await claimTowerRewards(tokenId, token, resolvedActId);
 
         tokenStatus.value[tokenId] = "completed";
         addLog({

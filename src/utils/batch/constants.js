@@ -49,6 +49,7 @@ export const availableTasks = [
   { label: "一键宝库4,5层", value: "batchbaoku45" },
   { label: "一键梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
+  { label: "兑换码", value: "batchClaimCdk" },
   { label: "营地挑战", value: "batchCampChallenge" },
   { label: "营地挑战宠物", value: "batchCampChallengePet" },
   { label: "领取营地任务奖励", value: "batchCampClaimTasks" },

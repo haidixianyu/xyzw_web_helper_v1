@@ -601,6 +601,13 @@
                   >
                     功法券领取
                   </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="showCdkModal = true"
+                  >
+                    兑换码
+                  </n-button>
                 </n-space>
 
                 <!-- 闯关与临时玩法 -->
@@ -1558,6 +1565,35 @@
           {{ cnt }} 票
         </n-button>
       </div>
+    </n-modal>
+
+    <!-- 批量兑换码 -->
+    <n-modal
+      v-model:show="showCdkModal"
+      preset="card"
+      title="批量兑换码"
+      style="width: 90%; max-width: 360px"
+      :auto-focus="false"
+    >
+      <n-space vertical :size="12">
+        <div class="cdk-modal-info">
+          将对已选中的 <b>{{ selectedTokens.length }}</b> 个账号执行兑换
+        </div>
+        <n-input
+          v-model:value="cdkCode"
+          size="large"
+          placeholder="请输入兑换码"
+          :disabled="isRunning"
+        />
+        <n-space justify="end" :size="12">
+          <n-button :disabled="isRunning" @click="showCdkModal = false">
+            取消
+          </n-button>
+          <n-button type="primary" :loading="isRunning" @click="confirmCdk">
+            确定
+          </n-button>
+        </n-space>
+      </n-space>
     </n-modal>
 
     <!-- 怪异塔助力 -->
@@ -5585,6 +5621,8 @@ const autumnVote = async () => {
 // 领取挂机：加钟次数（默认2，0=仅领取不加钟）
 // =====================
 const hangUpAddTimes = ref(2);
+// 兑换码（批量兑换，默认 wuzhounian2026）
+const cdkCode = ref("wuzhounian2026");
 
 // =====================
 // 金砖周（黑市周）判断
@@ -6124,6 +6162,7 @@ const taskGroupDefinitions = [
       "batchlingguanzi",
       "batchclubsign",
       "batchStudy",
+      "batchClaimCdk",
       "batcharenafight",
       "batchSmartSendCar",
       "batchClaimCars",
@@ -9758,6 +9797,8 @@ const createTaskDeps = () => ({
   giftQuantity,
   // 领取挂机：加钟次数
   hangUpAddTimes,
+  // 批量兑换码
+  cdkCode,
   // 竞技场相关辅助函数
   pickArenaTargetId,
   getTodayStartSec,
@@ -9774,6 +9815,7 @@ const {
   batchAddHangUpTime,
   batchStudy,
   batchclubsign,
+  batchClaimCdk,
   batchWarGuessCheer,
 } = tasksHangUp;
 
@@ -9904,6 +9946,21 @@ const APEX_VOTE_OPTIONS = [1, 5, 10];
 const startApexVote = (cnt) => {
   showApexVoteModal.value = false;
   batchApexVote("", cnt);
+};
+
+// 兑换码：按钮弹框确认后执行（默认 wuzhounian2026）
+const showCdkModal = ref(false);
+const confirmCdk = () => {
+  if (!(cdkCode.value || "").trim()) {
+    message.warning("请输入兑换码");
+    return;
+  }
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择账号");
+    return;
+  }
+  showCdkModal.value = false;
+  batchClaimCdk();
 };
 const footballPickOptions = [
   { label: "主胜", value: 1 },
@@ -10670,6 +10727,23 @@ const stopBatch = () => {
 
 .apex-vote-options .n-button {
   flex: 1;
+}
+
+/* 批量兑换码弹框 */
+.cdk-modal-info {
+  font-size: 13px;
+  color: #909090;
+  text-align: center;
+}
+
+.cdk-modal-info b {
+  color: #18a058;
+}
+
+@media (max-width: 768px) {
+  .cdk-modal-info {
+    font-size: 12px;
+  }
 }
 
 /* 日志内表格（星级信息等） */

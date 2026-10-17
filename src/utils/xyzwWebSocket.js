@@ -201,6 +201,8 @@ export function registerDefaultCommands(reg) {
     .register("system_signinreward")
     .register("system_mysharecallback", { isSkipShareCard: true, type: 2 })
     .register("system_custom", { key: "", value: 0 })
+    // CDK 兑换码（2026-10-17 抓包：{key, platformType:"h5web"}，响应 syncrewardresp）
+    .register("system_claimcdkreward", { key: "", platformType: "h5web" })
 
     // 任务相关
     .register("task_claimdailypoint", { taskId: 1 })
@@ -1000,6 +1002,7 @@ export class XyzwWebSocketClient {
       respKey: options.respKey || cmd,
       sleep: options.sleep || 0,
       onSent: options.onSent,
+      onError: options.onError,
     };
 
     this.sendQueue.push(task);
@@ -1029,6 +1032,21 @@ export class XyzwWebSocketClient {
       // 发送消息，直接传递seq
       this.send(cmd, params, {
         seq: requestSeq,
+        onError: (err) => {
+          const pending = this.promises[requestSeq];
+          if (pending) {
+            workerClearTimeout(pending.timer);
+            delete this.promises[requestSeq];
+            const msg = String(err?.message || err);
+            pending.reject(
+              msg.includes("Unknown cmd")
+                ? new Error(
+                    `命令未注册: ${cmd}（请在 registerDefaultCommands 中注册）`,
+                  )
+                : err,
+            );
+          }
+        },
         onSent: () => {
           // 消息发送成功后，不要清除超时器，让它继续等待响应
           // 只有在收到响应或超时时才清除
@@ -1162,6 +1180,8 @@ export class XyzwWebSocketClient {
         if (task.sleep) await sleep(task.sleep);
       } catch (error) {
         wsLogger.error(`发送消息失败: ${task.cmd}`, error);
+        // 通知调用方发送失败（未注册命令/编码异常等），避免 promise 悬空到超时
+        task.onError?.(error);
       }
     }, 50);
   }
@@ -1394,6 +1414,7 @@ export class XyzwWebSocketClient {
         "artifact_exchange",
         "hero_exchange",
         "hero_rebirth",
+        "system_claimcdkreward",
       ],
     };
 
