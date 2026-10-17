@@ -208,12 +208,29 @@
   };
 
   // 模拟 HORTOR SDK
-  window.__HORTOR_SDK__ = {
-    tga: { track() {} },
-    // PlatformH5.setClipboardData 的实际调用目标(签名 {text:string})
-    setClipboard: sdkSetClipboard,
-    getClipboard: sdkGetClipboard
-  };
+  // 2026-10-17: launcher 的 PlatformH5 适配器以 window.__HORTOR_SDK__ 为桥接对象
+  // (i === window.__HORTOR_SDK__, 见上方 setClipboard 注释), 除剪贴板外还会调用
+  // exitGame/restartGame/showModal 等方法 —— 实测其错误恢复路径调 exitGame, 缺失时抛
+  // "TypeError: i.exitGame is not a function"(堆栈: r.exitGame ← O.exitGame ← game/index.jsc),
+  // 恢复流程中断导致游戏卡死(黑屏/战斗界面挂起)。
+  // sdk_agent.min.js(官方 SDK 本地化)先于本脚本加载并定义 window.HORTOR_AGENT, 独立页面下其
+  // postMessage 通道建立失败被内部吞掉, 所有 mainCall 均为安全 no-op, 与官方独立 h5web 页一致。
+  // 因此这里不再整体覆盖 __HORTOR_SDK__(那会丢掉真实 SDK 的全部方法), 改为在其上补缺:
+  //   - exitGame/restartGame/showModal 等: 真实 SDK 已提供(mainCall no-op), 仅在 SDK 加载失败时兜底;
+  //   - tga: 官方由内联脚本注入 thinkingdata, 本地不加载, 用 no-op 补齐;
+  //   - setClipboard/getClipboard: 保留本地实现 —— 真实 SDK 的 setClipboard 走宿主通道,
+  //     独立页面是 no-op, 会退回「提示复制成功但粘贴为空」的老问题。
+  window.__HORTOR_SDK__ = window.__HORTOR_SDK__ || {};
+  var __hortorSdk = window.__HORTOR_SDK__;
+  ["exitGame", "restartGame", "showModal", "logout", "pay", "auth"].forEach(function (name) {
+    if (typeof __hortorSdk[name] !== "function") __hortorSdk[name] = function () {};
+  });
+  if (!__hortorSdk.tga || typeof __hortorSdk.tga.track !== "function") {
+    __hortorSdk.tga = __hortorSdk.tga || {};
+    __hortorSdk.tga.track = __hortorSdk.tga.track || function () {};
+  }
+  __hortorSdk.setClipboard = sdkSetClipboard;
+  __hortorSdk.getClipboard = sdkGetClipboard;
 
   // ========== 模块加载器 ==========
   window.define = function(name, factory) {

@@ -2,10 +2,10 @@
  * official-version-sync.js — 开机自动跟随官方 h5web 版本 (GAME_VERSION)
  *
  * 背景(2026-10-05):
- *   /login/manifest 通道已由 manifest-override.js 钉死 0.32.0-android（服务端唯一返回
- *   isLast+完整 bundleVers 的口径），GAME_VERSION 唯一剩下的作用是 WS 登录时上报
- *   clientVersion，服务端核验 platform=h5web 必须搭配官方当前版本号（「检测到您使用的
- *   客户端数据异常」弹窗的根因）。旧做法是手动把 game-defines.a175e.js 里的
+ *   /login/manifest 通道已由 manifest-override.js 钉死 0.1.0-androidh5（与「AI之王」同款：
+ *   服务端返回 isLast+完整 bundleVers 的 h5 构建通道），GAME_VERSION 唯一剩下的作用是 WS
+ *   登录时上报 clientVersion，服务端核验 platform=h5web 必须搭配官方当前版本号（「检测到您使用的
+ *   客户端数据异常」弹窗的根因）。旧做法是手动把 game-defines.1653c.js 里的
  *   gt.GAME_VERSION 钉成官方值 —— 官方一 bump 就过期，盐场/蟠桃直接挂。
  *
  * 做法（纯前端，官方 CDN 全开放 CORS: Access-Control-Allow-Origin: *）：
@@ -13,7 +13,7 @@
  *      → 解析当前 game-defines.<hash>.js / src/settings.<hash>.js / main.<hash>.js 文件名
  *   2. fetch 官方 game-defines.<hash>.js（仅 ~700B 纯常量块）
  *      → 正则提取 gt.GAME_VERSION（官方值永远最新）
- *   3. 本地 game-defines.a175e.js 已在本脚本之前同步执行完毕，此处用官方值覆盖
+ *   3. 本地 game-defines.1653c.js 已在本脚本之前同步执行完毕，此处用官方值覆盖
  *      gt.GAME_VERSION；window.boot() 由页面 await 本脚本的 ready promise 后再调用，
  *      保证游戏内任何读取（WS 登录 clientVersion / manifest 上报源）都拿到定稿值。
  *   4. 任何一步失败（网络/改版/超时 5s）→ 保留本地钉死值兜底，行为与旧版完全一致。
@@ -23,7 +23,7 @@
  *   提醒重新抓取重打补丁。
  *
  * 页面接入约定：
- *   - <script src="official-version-sync.js"> 必须排在 game-defines.a175e.js 之后、
+ *   - <script src="official-version-sync.js"> 必须排在 game-defines.1653c.js 之后、
  *     main.2a00e.js 之前（index.html 与 multi-game.html 均已接入）
  *   - 调用 window.boot() 前必须 await window.__xyzwVersionSyncReady
  *     （promise 永不 reject，最长阻塞 TIMEOUT_MS）
@@ -37,7 +37,7 @@
   // gt 即 globalThis（game-defines 头部定义），本地常量文件必须先于此脚本执行
   if (typeof window.gt !== "object" || !window.gt) {
     console.warn(
-      "[verSync] window.gt 不存在，脚本时序错误：必须排在 game-defines.a175e.js 之后"
+      "[verSync] window.gt 不存在，脚本时序错误：必须排在 game-defines.1653c.js 之后"
     );
     window.__xyzwVersionSyncReady = Promise.resolve();
     return;

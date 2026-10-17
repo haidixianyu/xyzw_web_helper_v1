@@ -29,4 +29,5 @@ export { createTasksSaltroad } from './tasksSaltroad.js';
 export { createTasksShidian } from './tasksShidian.js';
 export { createTasksCampChallenge } from './tasksCampChallenge.js';
 export { createTasksXuanwuBlessing } from './tasksXuanwuBlessing.js';
+export { createTasksCelebrate } from './tasksCelebrate.js';
 export { createTasksPkRoom } from './tasksPkRoom.js';

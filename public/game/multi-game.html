@@ -46,11 +46,13 @@
         if (!window.__MULTI_GAME_BRIDGE_READY__) return;
 
         const runtime = [
+          "sdk_agent.min.js",
+          "hortor-agent-shim.js",
           "manifest-override.js",
           "patch.decrypted_readable.js",
           "ws-capture.js",
-          "src/settings.da7ef.js",
-          "game-defines.a175e.js",
+          "src/settings.a1489.js",
+          "game-defines.1653c.js",
           "official-version-sync.js",
           "main.2a00e.js",
           "cocos2d-js-min.a5841.js",
@@ -62,10 +64,13 @@
           "peach-auto.js",
           "diagnose_require.js",
         ];
+        // v= 缓存穿透: 与 index.html 保持同一策略 —— 加载器脚本改动后必须重新拉取,
+        // 否则客户端仍跑旧逻辑(现象: manifest 返回的还是旧的 0.32.0-android bundleVers)。
+        const CACHE_TAG = "1017b";
         const loadScript = (src) =>
           new Promise((resolve, reject) => {
             const script = document.createElement("script");
-            script.src = src;
+            script.src = src + (src.indexOf("?") >= 0 ? "&" : "?") + "v=" + CACHE_TAG;
             script.charset = "utf-8";
             script.onload = resolve;
             script.onerror = () => reject(new Error(`Unable to load ${src}`));
@@ -94,8 +99,13 @@
           await (window.__xyzwVersionSyncReady || Promise.resolve());
           await window.boot();
           notify("ready");
-        })().catch(() => {
-          document.getElementById("splash").textContent = "游戏资源加载失败";
+        })().catch((err) => {
+          const splash = document.getElementById("splash");
+          splash.style.display = "block";
+          splash.textContent =
+            "游戏资源加载失败: " +
+            ((err && (err.message || err)) || "未知错误") +
+            "（按 F12 看 Console 首条红色报错）";
           notify("fatal", "runtime-load-failed");
         });
       })();

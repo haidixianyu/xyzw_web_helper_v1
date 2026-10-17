@@ -1,11 +1,18 @@
 /**
- * manifest-override.js — 页面级拦截 /login/manifest 请求, 强制 version=0.32.0-android
+ * manifest-override.js — 页面级拦截 /login/manifest 请求, 强制 version=0.1.0-androidh5
  *
- * 背景(2026-10-04 实证):
- *   线上 POST https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=X 只有
- *   version=0.32.0-android 返回 isLast=true + 完整 bundleVers; 换成 1.90.3-h5web / 1.89.8-wx 等
- *   既无 isLast(游戏侧 IsLastVersion=false → 弹「版本异常, 请下载最新版本」)也无 bundleVers
- *   (启动器 ensureBundleVers 抛错 → 白屏)。
+ * 背景(2026-10-04 实证 / 2026-10-17 修正):
+ *   线上 POST https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=X
+ *   能返回 isLast=true + 完整 bundleVers 的通道有两个:
+ *     - 0.1.0-androidh5  → h5 构建的 bundleVers(game=b72ac / launcher=4cccb / ui_main=2ca2e /
+ *                          internal="" / TEST_REMOTE_MODULE=c5e7c, 1312 键), 与本地官方 h5web 版
+ *                          settings/main/cocos2d 资源同源, 也与「AI之王」资源面板缓存的三个包
+ *                          完全一致(game 16.26MB / launcher 857KB)。【当前采用】
+ *     - 0.32.0-android   → android 构建的 bundleVers(game=22c3b / launcher=861b5 / ui_main=79a25,
+ *                          1300 键)。与本地 h5web 版资源不同源, 混用会卡在「正在加载地图」,
+ *                          且其 ui_main 缺少 h5web 侧的活动入口。
+ *   1.90.3-h5web / 1.89.8-wx 等版本号只返回 858B、无 isLast、无 bundleVers → 启动器
+ *   ensureBundleVers 抛错 → 白屏。
  *
  *   而版本号被两处同时使用: 启动器自身的登录请求(LoginService.manifest, 取自 GAME_VERSION)
  *   和 main.2a00e.js 的拉包请求。任何一处口径不一致都会复现上面两个故障。
@@ -13,7 +20,7 @@
  * 做法(等效于桌面版在主进程做网络层拦截, 但纯浏览器页面也能实现):
  *   在游戏任何脚本执行前包一层原生 XMLHttpRequest / fetch, 只对 /login/manifest 的 URL 做
  *   version 参数改写。这样 GAME_VERSION 取什么值都不再影响结果 —— 两处请求统一被兜底到
- *   服务端唯一认可的 android 通道。
+ *   AI之王 同款的 0.1.0-androidh5 通道。
  *
  * 加载顺序: 必须排在所有游戏脚本之前 (index.html 第一个 <script>; multi-game.html runtime 首项)。
  */
@@ -22,7 +29,7 @@
   if (window.__XYZW_MANIFEST_OVERRIDE__) return;
   window.__XYZW_MANIFEST_OVERRIDE__ = true;
 
-  var FORCE_VERSION = "0.32.0-android";
+  var FORCE_VERSION = "0.1.0-androidh5";
   var MANIFEST_RE = /\/login\/manifest(?:[?#]|$)/i;
 
   // 只改写 /login/manifest 的 version 查询参数, 其余 URL 原样返回

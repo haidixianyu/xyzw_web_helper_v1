@@ -316,6 +316,9 @@ window.convertAssets = function (url) {
   if (!url.startsWith('assets/') || url.startsWith('assets/internal')) {
     return url
   }
+  // 注意: 不要在此按 bundle 名做特殊路由。downloadBundle 会额外用
+  // toRemoteUrl('assets/<bundleName>') 计算 bundle 的 data.base, 若 config.json/index.js
+  // 的下载地址与 data.base 指向不同仓库, bundle 内资源引用就会解析错误导致加载卡死。
   let newUrl = 'https://xxz-xyzw-res.hortorgames.com/remote/' + url.slice(7)
   if (url.startsWith('assets/game') || url.startsWith('assets/launcher') || url.startsWith('assets/TEST_REMOTE_MODULE')) {
     if (url.endsWith('.js') || url.endsWith('.jsc')) {
@@ -366,10 +369,11 @@ window.parseRemoteBundleVers = function (settingsObj) {
 }
 
 window.loadRemoteBundleVers = async function () {
-  // 与 GAME_VERSION 同源(口径统一): 线上 manifest 只有 0.32.0-android 返回 isLast=true + 完整
-  // bundleVers; 其他版本号会导致 isLast 缺失(游戏内「版本异常」弹窗)或 bundleVers 缺失(启动即失败)。
+  // 与 GAME_VERSION 同源(口径统一), 且实际 URL 会被 manifest-override.js 改写成
+  // 0.1.0-androidh5(h5 构建的 bundleVers, 与本地官方 h5web 版资源同源);
+  // 其他版本号会导致 isLast 缺失(游戏内「版本异常」弹窗)或 bundleVers 缺失(启动即失败)。
   const version =
-    (typeof window !== 'undefined' && window.GAME_VERSION) || '0.32.0-android'
+    (typeof window !== 'undefined' && window.GAME_VERSION) || '0.1.0-androidh5'
   const manifestUrl = `https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=${encodeURIComponent(version)}`
   console.log('[remoteAssets] POST manifest', manifestUrl)
 
@@ -399,7 +403,13 @@ window.loadRemoteBundleVers = async function () {
   }
 
   const bundleVers = window.parseRemoteBundleVers(settingsObj)
-  Object.assign(window._CCSettings.bundleVers, bundleVers)
+  // 2026-10-17: manifest 是 bundleVers 的唯一权威来源 —— 整体替换而非合并。
+  // 本地 src/settings.a1489.js 是官方 h5web 版 settings, 其 bundleVers 里有 18 个键
+  // (main / internal / ui_transferH5 / ui_moon_* / ui_ring* / ui_gvg / ui_afTreasure …)
+  // 是 h5web 专有、remote CDN 上并不存在的; 合并保留会让加载这些 bundle 时必 404。
+  // 原基线(最小 settings, 仅 internal:'')就是这个语义, 这里对齐回来; internal 需保留
+  // (manifest 不含该键, 引擎按 'internal' 载入本地 assets/internal)。
+  window._CCSettings.bundleVers = Object.assign({ internal: '' }, bundleVers)
   console.log('[remoteAssets] 远程版本已拉取', {
     launcher: bundleVers.launcher,
     game: bundleVers.game,
@@ -565,11 +575,29 @@ window.installRemoteAssetLoader = function () {
   console.log('[remoteAssets] 资源加载已切换到 CDN')
 }
 
+// 2026-10-17: 启动链路任何一步失败都必须"看得见"。原来失败只 console.error,
+// 而页面早已把 splash 隐藏 -> 用户看到纯黑屏, 拿不到任何定位信息。
+// 这里把错误回写到 splash, 使"进不去"变成一条可读的报错。
+window.__xyzwReportBootError = function (err) {
+  try {
+    console.error('[boot] 启动失败', err)
+    var splash = document.getElementById('splash')
+    if (!splash) return
+    splash.style.display = 'block'
+    splash.innerHTML =
+      '<div style="padding:24px;color:#fff;font:14px/1.6 sans-serif;text-align:center">' +
+      '游戏启动失败: ' +
+      ((err && (err.message || err)) || '未知错误') +
+      '<br>请按 F12 查看 Console 里的首条红色报错</div>'
+  } catch (e) {}
+}
+
 window.boot = async function () {
   try {
     await window.ensureBundleVers()
   } catch (err) {
     console.error('[remoteAssets] 远程版本拉取失败，已停止启动以避免加载旧资源', err)
+    window.__xyzwReportBootError(err)
     throw err
   }
 
@@ -649,18 +677,20 @@ window.boot = async function () {
     })
 
     bundle.loadScene(launchScene, null, onProgress, function (err, scene) {
-      if (!err) {
-        cc.director.runSceneImmediate(scene)
-        if (cc.sys.isBrowser) {
-          // show canvas
-          var canvas = document.getElementById('GameCanvas')
-          canvas.style.visibility = ''
-          var div = document.getElementById('GameDiv')
-          if (div) {
-            div.style.backgroundImage = ''
-          }
-          console.log('Success to load scene: ' + launchScene)
+      if (err) {
+        window.__xyzwReportBootError(err)
+        return
+      }
+      cc.director.runSceneImmediate(scene)
+      if (cc.sys.isBrowser) {
+        // show canvas
+        var canvas = document.getElementById('GameCanvas')
+        canvas.style.visibility = ''
+        var div = document.getElementById('GameDiv')
+        if (div) {
+          div.style.backgroundImage = ''
         }
+        console.log('Success to load scene: ' + launchScene)
       }
     })
   }
@@ -685,12 +715,17 @@ window.boot = async function () {
 
   var count = 0
   function cb(err) {
-    if (err) return console.error(err.message, err.stack)
+    if (err) {
+      window.__xyzwReportBootError(err)
+      return console.error(err.message, err.stack)
+    }
     count++
     if (count === bundleRoot.length + 1) {
       cc.assetManager.loadBundle(MAIN, function (err) {
         if (!err) {
           cc.game.run(option, onStart)
+        } else {
+          window.__xyzwReportBootError(err)
         }
       })
     }

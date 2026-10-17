@@ -52,30 +52,47 @@
       </div>
     </div>
 
-    <script src="manifest-override.js" charset="utf-8"></script>
-    <script src="patch.decrypted_readable.js" charset="utf-8"></script>
-    <script src="ws-capture.js" charset="utf-8"></script>
-    <script src="src/settings.da7ef.js" charset="utf-8"></script>
-    <script src="game-defines.a175e.js" charset="utf-8"></script>
-    <script src="official-version-sync.js" charset="utf-8"></script>
-    <script src="main.2a00e.js" charset="utf-8"></script>
-    <script src="cocos2d-js-min.a5841.js" charset="utf-8"></script>
-    <script src="xh.js" charset="utf-8"></script>
-    <script src="sh1.js" charset="utf-8"></script>
-    <script src="bin-tool-drag-patch.js" charset="utf-8"></script>
-    <script src="nightmare-skip.js" charset="utf-8"></script>
-    <script src="map-zoom.js" charset="utf-8"></script>
-    <script src="peach-auto.js" charset="utf-8"></script>
-    <script src="diagnose_require.js" charset="utf-8"></script>
+    <!-- v= 缓存穿透: 这些加载器脚本改动后必须让客户端重新拉取, 否则仍跑旧逻辑
+         (现象: 网络面板里 manifest 返回的还是旧的 0.32.0-android bundleVers)。 -->
+    <!-- Hortor H5-SDK（官方入口页同步引入，launcher 依赖 HORTOR_AGENT.exitGame 等方法） -->
+    <script src="sdk_agent.min.js?v=1017b" charset="utf-8"></script>
+    <script src="hortor-agent-shim.js?v=1017b" charset="utf-8"></script>
+    <script src="manifest-override.js?v=1017b" charset="utf-8"></script>
+    <script src="patch.decrypted_readable.js?v=1017b" charset="utf-8"></script>
+    <script src="ws-capture.js?v=1017b" charset="utf-8"></script>
+    <script src="src/settings.a1489.js?v=1017b" charset="utf-8"></script>
+    <script src="game-defines.1653c.js?v=1017b" charset="utf-8"></script>
+    <script src="official-version-sync.js?v=1017b" charset="utf-8"></script>
+    <script src="main.2a00e.js?v=1017b" charset="utf-8"></script>
+    <script src="cocos2d-js-min.a5841.js?v=1017b" charset="utf-8"></script>
+    <script src="xh.js?v=1017b" charset="utf-8"></script>
+    <script src="sh1.js?v=1017b" charset="utf-8"></script>
+    <script src="bin-tool-drag-patch.js?v=1017b" charset="utf-8"></script>
+    <script src="nightmare-skip.js?v=1017b" charset="utf-8"></script>
+    <script src="map-zoom.js?v=1017b" charset="utf-8"></script>
+    <script src="peach-auto.js?v=1017b" charset="utf-8"></script>
+    <script src="diagnose_require.js?v=1017b" charset="utf-8"></script>
     <script type="text/javascript">
       (function () {
         window.HtmlIsLoaded = true;
         var splash = document.getElementById("splash");
         splash.style.display = "none";
         // 等待官方 GAME_VERSION 探测定稿（最长 5s、永不 reject）再启动游戏
-        (window.__xyzwVersionSyncReady || Promise.resolve()).then(function () {
-          window.boot();
-        });
+        (window.__xyzwVersionSyncReady || Promise.resolve())
+          .then(function () {
+            return window.boot();
+          })
+          .catch(function (err) {
+            // 启动链路一旦失败原来只 console.error, 而 splash 已被隐藏 -> 用户看到纯黑屏。
+            // 这里把错误回写到 splash, 让"进不去"变成一条可读的信息。
+            console.error("[boot] 启动失败", err);
+            splash.style.display = "block";
+            splash.innerHTML =
+              '<div style="padding:24px;color:#fff;font:14px/1.6 sans-serif;text-align:center">' +
+              "游戏启动失败: " +
+              ((err && (err.message || err)) || "未知错误") +
+              "<br>请按 F12 查看 Console 里的首条红色报错</div>";
+          });
       })();
     </script>
   </body>

@@ -717,29 +717,43 @@
                   </n-button>
                 </n-space>
 
-                <!-- 玄武赐福 -->
+                <!-- 周年 -->
                 <n-space size="small" align="center" wrap>
-                  <span class="batch-group-label">玄武赐福</span>
+                  <span class="batch-group-label">周年</span>
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchXuanwuBlessing"
+                    @click="batchCelebrateSign"
                   >
-                    任务奖励
+                    周年祝福
                   </n-button>
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchXuanwuLottery"
+                    @click="batchCelebrateClaim"
                   >
-                    连续抽奖
+                    周年领取
                   </n-button>
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchXuanwuSingleLottery"
+                    @click="batchCelebrateSingleLottery"
                   >
-                    单次抽奖
+                    单抽
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebrateTenLottery"
+                  >
+                    十连抽
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebrateWarOrderClaim"
+                  >
+                    入镜任务
                   </n-button>
                 </n-space>
               </n-space>
@@ -1326,6 +1340,35 @@
                     {{ monthlyStoreTooltip }}
                   </div>
                 </n-tooltip>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="history" tab="历史">
+              <n-space vertical>
+                <!-- 玄武赐福 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">玄武赐福</span>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchXuanwuBlessing"
+                  >
+                    任务奖励
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchXuanwuLottery"
+                  >
+                    连续抽奖
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchXuanwuSingleLottery"
+                  >
+                    单次抽奖
+                  </n-button>
+                </n-space>
               </n-space>
             </n-tab-pane>
           </n-tabs>
@@ -4141,6 +4184,7 @@ import {
   createTasksShidian,
   createTasksCampChallenge,
   createTasksXuanwuBlessing,
+  createTasksCelebrate,
   createTasksPkRoom,
 } from "@/utils/batch";
 import {
@@ -6177,6 +6221,11 @@ const taskGroupDefinitions = [
       "batchXuanwuLottery",
       "batchXuanwuSingleLottery",
       "batchPkRoomAppoint",
+      "batchCelebrateSign",
+      "batchCelebrateClaim",
+      "batchCelebrateSingleLottery",
+      "batchCelebrateTenLottery",
+      "batchCelebrateWarOrderClaim",
     ],
   },
   {
@@ -9916,6 +9965,15 @@ const { batchXuanwuBlessing, batchXuanwuLottery, batchXuanwuSingleLottery } =
 
 const tasksPkRoom = createTasksPkRoom(createTaskDeps());
 const { batchPkRoomAppoint } = tasksPkRoom;
+
+const tasksCelebrate = createTasksCelebrate(createTaskDeps());
+const {
+  batchCelebrateSign,
+  batchCelebrateClaim,
+  batchCelebrateSingleLottery,
+  batchCelebrateTenLottery,
+  batchCelebrateWarOrderClaim,
+} = tasksCelebrate;
 
 // 营地挑战模式选择
 const campChallengeMode = ref("pet");

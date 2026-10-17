@@ -73,6 +73,11 @@ export const availableTasks = [
   { label: "玄武赐福任务奖励", value: "batchXuanwuBlessing" },
   { label: "玄武赐福连续抽奖", value: "batchXuanwuLottery" },
   { label: "玄武赐福单次抽奖", value: "batchXuanwuSingleLottery" },
+  { label: "周年祝福", value: "batchCelebrateSign" },
+  { label: "周年领取", value: "batchCelebrateClaim" },
+  { label: "周年单抽", value: "batchCelebrateSingleLottery" },
+  { label: "周年十连抽", value: "batchCelebrateTenLottery" },
+  { label: "周年入镜任务", value: "batchCelebrateWarOrderClaim" },
   { label: "比赛预约", value: "batchPkRoomAppoint" },
   { label: "月度商店购买", value: "batchMonthlyStoreBuy" },
 ];

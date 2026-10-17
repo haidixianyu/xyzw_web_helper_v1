@@ -11,7 +11,7 @@
               class="console-entry-btn"
               @click="showConsoleDrawer = true"
             >
-              <n-icon size="16" style="margin-right: 4px">
+              <n-icon size="18" style="margin-right: 6px">
                 <Grid />
               </n-icon>
               XYZW 控制台
@@ -2458,7 +2458,9 @@ onUnmounted(() => {
 }
 
 /* 控制台入口: 固定在视口左上角, 跟随页面滚动始终停留在当前可见区域顶部。
-   宽屏(>1200px)时与 .container 左边缘对齐, 窄屏时贴安全区。 */
+   宽屏(>1200px)时与 .container 左边缘对齐, 窄屏时贴安全区。
+   使用不透明实色 + 阴影, 使其成为清晰的独立浮层, 滚动到列表上方时
+   不会透出/混同卡片底色, 并置于页面最顶层。 */
 .console-entry-btn {
   position: fixed;
   left: max(
@@ -2467,20 +2469,22 @@ onUnmounted(() => {
   );
   top: calc(var(--spacing-lg) + env(safe-area-inset-top, 0px));
   transform: none;
-  z-index: var(--z-sticky);
-  color: #fff;
-  background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  z-index: var(--z-fixed);
+  color: #ffffff;
+  background: var(--primary-color, #667eea);
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 14px rgba(102, 126, 234, 0.42);
   border-radius: var(--border-radius-medium, 8px);
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 6px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .console-entry-btn:hover {
-  background: rgba(255, 255, 255, 0.32) !important;
-  color: #fff !important;
+  background: var(--primary-color-hover, #5a67d8) !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 18px rgba(102, 126, 234, 0.5);
 }
 
 /* 控制台导航抽屉: 与 DefaultLayout 保持一致 */
@@ -2689,9 +2693,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  /* 列表头部(标题/工具栏/分组) 不吸顶, 随页面正常滚走;
+     仅左上角的「控制台入口」按钮保持 fixed 跟随滚动 */
   background: var(--bg-primary);
   margin: calc(-1 * var(--spacing-xl)) calc(-1 * var(--spacing-xl)) var(--spacing-md);
   padding: var(--spacing-lg) var(--spacing-xl);

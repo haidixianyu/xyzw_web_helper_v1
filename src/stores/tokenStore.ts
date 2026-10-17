@@ -373,9 +373,11 @@ export const useTokenStore = defineStore("tokens", () => {
         }
       } else if (
         gameToken.importMethod === "bin" ||
-        gameToken.importMethod === "wxQrcode"
+        gameToken.importMethod === "wxQrcode" ||
+        gameToken.importMethod === "sms"
       ) {
-        // Bin形式token刷新
+        // Bin形式token刷新（bin/wxQrcode/sms 均依赖 IndexedDB 中的 BIN 数据重新生成 token）
+
         let userToken: ArrayBuffer | null = await getArrayBuffer(tokenId);
         let usedOldKey = false;
 
