@@ -1,18 +1,16 @@
 /**
  * 周年活动批量任务
- * 祝福(签到) / 领取(个人 + 分享) / 抽奖(单抽 + 十连抽) / 入镜任务领取
+ * 祝福(签到) / 领取(个人 + 分享) / 抽奖(单抽、十连抽) / 入镜任务领取
  *
  * 入镜任务复用“通行证(warOrder)”活动框架（命令 activity_warordertaskclaim），
- * 与 tasksXuanwuBlessing.js 同构；区别是活动ID后缀与只领取任务序号 01-05。
+ * 与 tasksXuanwuBlessing.js 同构；区别是活动ID后缀，领取范围由服务端
+ * complete / taskClaimed 数据决定，不再硬编码任务序号。
  */
 
 import { getXuanwuActBase } from "@/utils/towerActId";
 
 // 入镜任务活动ID后缀（前缀 = 活动起始日期 YYMMDD，如 "261016" + "9" = 2610169）
 const WAR_ORDER_SUFFIX = "9";
-
-// 入镜任务只领取序号 01-05（906-914 暂不处理）
-const MAX_MISSION_INDEX = 5;
 
 // 十连抽次数
 const DRAW_BATCH_TIMES = 10;
@@ -382,7 +380,11 @@ export function createTasksCelebrate(deps) {
     return null;
   };
 
-  /** 领取入镜任务（仅 missionId 末两位 01-05，未领取且进度>0） */
+  /**
+   * 领取入镜任务：遍历活动内全部任务，跳过已领取(taskClaimed)与零进度(complete<=0)，
+   * 其余尝试领取；服务端对“未达成完成条件”返回错误(700010)即视为未完成跳过，
+   * 因此无需硬编码任务序号或后续手动补充。
+   */
   const claimCelebrateTasks = async (tokenId, actId, info, tokenName) => {
     const complete = info?.complete || {};
     const claimedMap = info?.taskClaimed || {};
@@ -394,9 +396,6 @@ export function createTasksCelebrate(deps) {
       if (shouldStop.value) break;
       if (claimedMap[missionIdStr] === true) continue;
       if (!(progress > 0)) continue;
-
-      const missionIndex = Number(String(missionIdStr).slice(-2));
-      if (!(missionIndex >= 1 && missionIndex <= MAX_MISSION_INDEX)) continue;
 
       const missKey = `${missionIdStr}:${progress}`;
       if (missed.has(missKey)) continue;
@@ -443,7 +442,7 @@ export function createTasksCelebrate(deps) {
     return claimed;
   };
 
-  /** 周年入镜任务领取（901-905） */
+  /** 周年入镜任务领取（按服务端数据自动判定） */
   const batchCelebrateWarOrderClaim = async () =>
     runBatch("周年入镜任务", async (token, tokenId) => {
       const resolved = await resolveWarOrder(tokenId, token.name);
