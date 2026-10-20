@@ -566,24 +566,15 @@
                   <span class="batch-group-label">常规</span>
                   <n-button
                     size="small"
-                    @click="claimHangUpRewards"
+                    @click="openHangUpModal('claim')"
                     :disabled="isRunning || selectedTokens.length === 0"
                   >
                     领取挂机
                   </n-button>
-                  <span class="batch-inline-label">加钟次数</span>
-                  <n-input-number
-                    v-model:value="hangUpAddTimes"
-                    size="small"
-                    :min="0"
-                    :max="10"
-                    :step="1"
-                    class="batch-count-input"
-                  />
                   <n-button
                     size="small"
-                    @click="batchAddHangUpTime"
-                    :disabled="isRunning || selectedTokens.length === 0 || hangUpAddTimes === 0"
+                    @click="openHangUpModal('add')"
+                    :disabled="isRunning || selectedTokens.length === 0"
                   >
                     一键加钟
                   </n-button>
@@ -754,6 +745,13 @@
                     @click="batchCelebrateWarOrderClaim"
                   >
                     入镜任务
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebratePhoto"
+                  >
+                    放入胶卷
                   </n-button>
                 </n-space>
               </n-space>
@@ -1585,6 +1583,31 @@
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
           <n-button type="primary" @click="saveSettings">保存设置</n-button>
         </div>
+      </div>
+    </n-modal>
+
+    <!-- 领取挂机 / 一键加钟：选择加钟次数，点选后直接执行 -->
+    <n-modal
+      v-model:show="showHangUpModal"
+      preset="card"
+      :title="hangUpModalTitle"
+      style="width: 90%; max-width: 360px"
+      :auto-focus="false"
+    >
+      <div class="hangup-times-options">
+        <n-button
+          v-for="cnt in HANGUP_TIME_OPTIONS"
+          :key="cnt"
+          type="primary"
+          secondary
+          size="large"
+          @click="startHangUpTask(cnt)"
+        >
+          {{ cnt }}
+        </n-button>
+      </div>
+      <div class="hangup-times-hint">
+        {{ hangUpModalMode === 'claim' ? '0 = 仅领取挂机奖励，不加钟' : '0 = 不加钟（不执行）' }}
       </div>
     </n-modal>
 
@@ -5665,6 +5688,27 @@ const autumnVote = async () => {
 // 领取挂机：加钟次数（默认2，0=仅领取不加钟）
 // =====================
 const hangUpAddTimes = ref(2);
+// 领取挂机 / 一键加钟：不再在工具栏输入次数，改为点击按钮后弹框选择 0~4，
+// 点选数字后立即执行整个操作。
+const showHangUpModal = ref(false);
+const hangUpModalMode = ref("claim"); // claim = 领取挂机, add = 一键加钟
+const HANGUP_TIME_OPTIONS = [0, 1, 2, 3, 4];
+const hangUpModalTitle = computed(() =>
+  hangUpModalMode.value === "claim" ? "领取挂机 - 选择加钟次数" : "一键加钟 - 选择次数",
+);
+const openHangUpModal = (mode) => {
+  hangUpModalMode.value = mode;
+  showHangUpModal.value = true;
+};
+const startHangUpTask = (times) => {
+  showHangUpModal.value = false;
+  hangUpAddTimes.value = times;
+  if (hangUpModalMode.value === "claim") {
+    claimHangUpRewards(times);
+  } else {
+    batchAddHangUpTime(times);
+  }
+};
 // 兑换码（批量兑换，默认 wuzhounian2026）
 const cdkCode = ref("wuzhounian2026");
 
@@ -6226,6 +6270,7 @@ const taskGroupDefinitions = [
       "batchCelebrateSingleLottery",
       "batchCelebrateTenLottery",
       "batchCelebrateWarOrderClaim",
+      "batchCelebratePhoto",
     ],
   },
   {
@@ -9973,6 +10018,7 @@ const {
   batchCelebrateSingleLottery,
   batchCelebrateTenLottery,
   batchCelebrateWarOrderClaim,
+  batchCelebratePhoto,
 } = tasksCelebrate;
 
 // 营地挑战模式选择
@@ -10775,6 +10821,23 @@ const stopBatch = () => {
 
 .batch-count-input {
   width: 90px !important;
+}
+
+/* 领取挂机 / 一键加钟 次数选择 */
+.hangup-times-options {
+  display: flex;
+  gap: 10px;
+}
+
+.hangup-times-options .n-button {
+  flex: 1;
+}
+
+.hangup-times-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #909090;
+  text-align: center;
 }
 
 /* 逐鹿助威票数选择 */

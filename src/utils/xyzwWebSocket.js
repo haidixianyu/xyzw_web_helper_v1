@@ -413,6 +413,9 @@ export function registerDefaultCommands(reg) {
     .register("celebrate_claimpersonal", { idList: [] }) // 领取个人奖励(可含签到/分享档位)
     .register("celebrate_share", { id: 0 }) // 分享领取，响应 celebrate_claimresp
     .register("activity_maydaylottery", { times: 1 }) // 周年抽奖(times: 10 十连 / 1 单抽)
+    // 周年放入胶卷/兑换礼物 (activity_photo / activity_claimphotoreward)
+    .register("activity_photo")
+    .register("activity_claimphotoreward")
     // 活动商店购买/领取（黑市周江湖黑市等，params: {activityId, goodsIndex, buyNum}）
     .register("activity_buystoregoods")
     // 怪异塔「爬塔之路」战令奖励 (battlePassId 固定为 1003)
@@ -1367,7 +1370,11 @@ export class XyzwWebSocketClient {
       activity_getlotteryinforesp: "activity_getlotteryinfo",
       activity_lotteryresp: "activity_lottery",
       activity_claimlotterycumulativeresp: "activity_claimlotterycumulative",
-      activity_rewardresp: ["activity_claimsignreward", "activity_claimtaskreward"],
+      activity_rewardresp: [
+        "activity_claimsignreward",
+        "activity_claimtaskreward",
+        "activity_claimphotoreward",
+      ],
       activity_battlepassrewardclaimresp: "activity_battlepassrewardclaim",
       // 周年活动响应映射
       // celebrate_sign 与 celebrate_getcelebrateinfo 共用同一响应
@@ -1378,6 +1385,8 @@ export class XyzwWebSocketClient {
       // 个人领取与分享领取共用结果响应
       celebrate_claimresp: ["celebrate_claimpersonal", "celebrate_share"],
       activity_maydaylotteryresp: "activity_maydaylottery",
+      // 放入胶卷响应
+      activity_photoresp: "activity_photo",
       arena_getarearankresp: "arena_getarearank",
       bosstower_gethelprankresp: "bosstower_gethelprank",
       // 功法相关响应映射

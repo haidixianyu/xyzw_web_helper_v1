@@ -109,6 +109,8 @@ export const useTokenStore = defineStore("tokens", () => {
       status: "", // '', 'starting', 'answering', 'claiming_rewards', 'completed'
       timestamp: null,
     },
+    // 按账号(tokenId)独立存放答题状态，避免批量答题时互相覆盖
+    studyStatusByToken: {} as Record<string, any>,
     lastUpdated: null as string | null,
   });
 

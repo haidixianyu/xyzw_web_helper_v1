@@ -78,6 +78,7 @@ export const availableTasks = [
   { label: "周年单抽", value: "batchCelebrateSingleLottery" },
   { label: "周年十连抽", value: "batchCelebrateTenLottery" },
   { label: "周年入镜任务", value: "batchCelebrateWarOrderClaim" },
+  { label: "周年放入胶卷", value: "batchCelebratePhoto" },
   { label: "比赛预约", value: "batchPkRoomAppoint" },
   { label: "月度商店购买", value: "batchMonthlyStoreBuy" },
 ];

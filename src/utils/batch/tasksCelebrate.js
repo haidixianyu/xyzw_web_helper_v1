@@ -12,6 +12,13 @@ import { getXuanwuActBase } from "@/utils/towerActId";
 // 入镜任务活动ID后缀（前缀 = 活动起始日期 YYMMDD，如 "261016" + "9" = 2610169）
 const WAR_ORDER_SUFFIX = "9";
 
+// 胶片(放入胶卷)活动ID后缀（同前缀，如 "261016" + "8" = 2610168）
+const PHOTO_SUFFIX = "8";
+// 胶卷道具ID
+const FILM_ITEM_ID = 5290;
+// 每次最多放入 10 个；凑满 10 个自动兑换一次礼物
+const PHOTO_BATCH_SIZE = 10;
+
 // 十连抽次数
 const DRAW_BATCH_TIMES = 10;
 
@@ -309,6 +316,229 @@ export function createTasksCelebrate(deps) {
       );
     });
 
+  // ---------------- 周年放入胶卷 ----------------
+
+  /**
+   * 解析胶片活动ID与当前进度
+   * photoActivityInfo[activityId] = { num: 本张已放入数量, pieceId: 当前胶片编号 }
+   */
+  const resolvePhotoActivity = async (tokenId, tokenName) => {
+    const res = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "activity_get",
+      {},
+      8000,
+    );
+    const photoMap = res?.activity?.photoActivityInfo || {};
+
+    // 活动ID前缀为开启日期 YYMMDD；只接受最近 30 天内开启且后缀匹配的活动，
+    // 避免误取其它以 8 结尾的旧活动。
+    const isRecentAct = (actId) => {
+      const s = String(actId);
+      if (s.length < 7) return false;
+      const d = new Date(2000 + Number(s.slice(0, 2)), Number(s.slice(2, 4)) - 1, Number(s.slice(4, 6)));
+      if (Number.isNaN(d.getTime())) return false;
+      const days = (Date.now() - d.getTime()) / 86400000;
+      return days >= -1 && days <= 30;
+    };
+
+    const listed = Object.keys(photoMap)
+      .map(Number)
+      .filter(
+        (n) =>
+          Number.isFinite(n) &&
+          n > 0 &&
+          String(n).endsWith(PHOTO_SUFFIX) &&
+          isRecentAct(n),
+      )
+      // 越新的活动越靠前
+      .sort((a, b) => b - a);
+
+    // 回退：按活动起始日期推导（活动可能持续多日，向前探测 7 天）
+    const candidates = [];
+    const now = new Date();
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      candidates.push(Number(getXuanwuActBase(date) + PHOTO_SUFFIX));
+    }
+
+    for (const actId of [...new Set([...listed, ...candidates])]) {
+      const info = photoMap[actId];
+      if (info) return { actId, info };
+    }
+
+    // 最后兜底：活动后缀规则若有变化，直接取活动数据中最新的一条胶片进度
+    const anyIds = Object.keys(photoMap)
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .sort((a, b) => b - a);
+    for (const actId of anyIds) {
+      if (photoMap[actId]) return { actId, info: photoMap[actId] };
+    }
+
+    log(
+      `${tokenName} 未找到周年胶片活动（候选: ${[...new Set([...listed, ...candidates])].join(",")}）`,
+      "warning",
+    );
+    return null;
+  };
+
+  /** 读取当前账号的胶卷数量 */
+  const fetchFilmCount = async (tokenId) => {
+    const res = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      8000,
+    );
+    const qty = res?.role?.items?.[FILM_ITEM_ID]?.quantity;
+    return Number(qty) || 0;
+  };
+
+  /** 兑换一次胶片礼物 */
+  const claimPhotoReward = async (tokenId, actId, pieceId, tokenName) => {
+    try {
+      const res = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "activity_claimphotoreward",
+        { activityId: actId, pieceId },
+        8000,
+      );
+      log(
+        `${tokenName} 胶片礼物兑换: ${formatReward(res?.reward || []) || "无奖励"}`,
+        "success",
+      );
+      return { ok: true, info: res?.activity?.photoActivityInfo?.[actId] || null };
+    } catch (error) {
+      log(
+        `${tokenName} 胶片礼物兑换失败: ${error.message || "未知错误"}`,
+        "warning",
+      );
+      return { ok: false, info: null };
+    }
+  };
+
+  /**
+   * 周年放入胶卷：每次最多放 10 个，凑满 10 个自动兑换一次礼物。
+   * 协议：activity_photo {activityId, num, pieceId} ->
+   *       activity_claimphotoreward {activityId, pieceId}
+   */
+  const batchCelebratePhoto = async () =>
+    runBatch("周年放入胶卷", async (token, tokenId) => {
+      const resolved = await resolvePhotoActivity(tokenId, token.name);
+      if (!resolved) {
+        throw new Error("未找到周年胶片活动，请确认活动是否开启");
+      }
+
+      const { actId } = resolved;
+      let pieceId = Number(resolved.info?.pieceId) || 0;
+      let inPiece = Number(resolved.info?.num) || 0;
+      let films = await fetchFilmCount(tokenId);
+
+      if (films <= 0) {
+        log(`${token.name} 没有胶卷，跳过 (活动${actId})`, "info");
+        return;
+      }
+
+      log(
+        `${token.name} 胶卷 ${films} 个，当前胶片${pieceId} 已放 ${inPiece}/10`,
+      );
+
+      let placed = 0;
+      let claimed = 0;
+      let stallCount = 0;
+
+      while (films > 0 && !shouldStop.value) {
+        // 当前胶片已满：先兑换礼物，换到下一张
+        if (inPiece >= PHOTO_BATCH_SIZE) {
+          const res = await claimPhotoReward(tokenId, actId, pieceId, token.name);
+          if (res.ok) claimed++;
+          if (res.info) {
+            pieceId = Number(res.info.pieceId ?? pieceId);
+            inPiece = Number(res.info.num) || 0;
+          } else if (!res.ok) {
+            // 兑换失败时不再重复尝试同一张，避免死循环
+            break;
+          } else {
+            pieceId += 1;
+            inPiece = 0;
+          }
+          await delay(commandDelay);
+          continue;
+        }
+
+        const num = Math.min(PHOTO_BATCH_SIZE - inPiece, films);
+        let res;
+        try {
+          res = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_photo",
+            { activityId: actId, num, pieceId },
+            8000,
+          );
+        } catch (error) {
+          log(
+            `${token.name} 放入胶卷失败: ${error.message || "未知错误"}`,
+            "error",
+          );
+          break;
+        }
+
+        const info = res?.activity?.photoActivityInfo?.[actId];
+        const prevInPiece = inPiece;
+        const prevFilms = films;
+        if (info) {
+          pieceId = Number(info.pieceId ?? pieceId);
+          inPiece = Number(info.num) || 0;
+        } else {
+          inPiece += num;
+        }
+        placed += num;
+
+        // 响应里带最新胶卷数量（null 表示已用完），优先以服务端为准
+        const qty = res?.role?.items?.[FILM_ITEM_ID]?.quantity;
+        films = qty === null ? 0 : Number.isFinite(Number(qty)) ? Number(qty) : films - num;
+
+        // 防护：服务端既没推进本张进度也没扣胶卷（活动结束/参数不被接受）时避免死循环
+        if (inPiece <= prevInPiece && films >= prevFilms) {
+          stallCount++;
+          if (stallCount >= 3) {
+            log(`${token.name} 胶卷进度未推进，停止本次放入`, "warning");
+            break;
+          }
+        } else {
+          stallCount = 0;
+        }
+
+        log(
+          `${token.name} 放入胶卷 ${num} 个 (剩余 ${films}，胶片${pieceId} ${inPiece}/10)`,
+        );
+
+        if (inPiece >= PHOTO_BATCH_SIZE) {
+          const claimRes = await claimPhotoReward(tokenId, actId, pieceId, token.name);
+          if (claimRes.ok) claimed++;
+          if (claimRes.info) {
+            pieceId = Number(claimRes.info.pieceId ?? pieceId);
+            inPiece = Number(claimRes.info.num) || 0;
+          } else if (!claimRes.ok) {
+            break;
+          } else {
+            pieceId += 1;
+            inPiece = 0;
+          }
+          await delay(commandDelay);
+        }
+
+        await delay(commandDelay);
+      }
+
+      log(
+        `${token.name} 放入胶卷完成: 放入 ${placed} 个，兑换礼物 ${claimed} 次 (活动${actId})`,
+        placed > 0 ? "success" : "info",
+      );
+    });
+
   // ---------------- 周年入镜任务（通行证框架，仅 01-05） ----------------
 
   /** 拉取通行证活动信息 */
@@ -467,5 +697,6 @@ export function createTasksCelebrate(deps) {
     batchCelebrateSingleLottery,
     batchCelebrateTenLottery,
     batchCelebrateWarOrderClaim,
+    batchCelebratePhoto,
   };
 }

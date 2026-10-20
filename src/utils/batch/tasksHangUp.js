@@ -27,15 +27,19 @@ const readStudyRecord = () => {
 };
 
 // 本周是否已完成答题并领取奖励
+// 仅信任 verified=true 的记录（由服务器角色信息或完整答题流程确认）；
+// 旧版本可能因多账号共用状态而写入误判记录，那些纯数字记录一律忽略并重新校验。
 const isStudyCompletedThisWeek = (tokenId) => {
-  return readStudyRecord()[tokenId] === getWeekStartTime();
+  const entry = readStudyRecord()[tokenId];
+  if (!entry || typeof entry !== "object") return false;
+  return entry.week === getWeekStartTime() && entry.verified === true;
 };
 
 // 记录本周已完成（值为所在周的周一0点，跨周自动失效）
 const markStudyCompletedThisWeek = (tokenId) => {
   try {
     const record = readStudyRecord();
-    record[tokenId] = getWeekStartTime();
+    record[tokenId] = { week: getWeekStartTime(), verified: true };
     localStorage.setItem(STUDY_RECORD_KEY, JSON.stringify(record));
   } catch {
     /* 忽略存储异常 */
@@ -66,10 +70,30 @@ export function createTasksHangUp(deps) {
     cdkCode,
   } = deps;
 
+  // ===== 按账号读取/重置答题状态（与 stores/events/study.ts 的 studyStatusByToken 对应）=====
+  // 批量答题时多个账号并发，不能共用同一份状态，否则会出现
+  // “某个账号答完 → 其他账号也被判定为已完成”的误判。
+  const getTokenStudyStatus = (tokenId) =>
+    tokenStore.gameData?.studyStatusByToken?.[tokenId];
+
+  const resetTokenStudyStatus = (tokenId) => {
+    if (!tokenStore.gameData.studyStatusByToken) {
+      tokenStore.gameData.studyStatusByToken = {};
+    }
+    tokenStore.gameData.studyStatusByToken[tokenId] = {
+      isAnswering: false,
+      questionCount: 0,
+      answeredCount: 0,
+      status: "",
+      timestamp: null,
+    };
+  };
+
   /**
    * 领取挂机奖励
+   * @param {number} times 弹框选择的加钟次数（0=仅领取），未传则用 hangUpAddTimes
    */
-  const claimHangUpRewards = async () => {
+  const claimHangUpRewards = async (times) => {
     if (selectedTokens.value.length === 0) return;
 
     isRunning.value = true;
@@ -109,8 +133,10 @@ export function createTasksHangUp(deps) {
         );
         await workerSleep(500);
 
-        // 2. Add time（次数可配置，0=仅领取不加钟）
-        const addTimes = hangUpAddTimes?.value ?? 2;
+        // 2. Add time（次数由弹框选择，0=仅领取不加钟）
+        const addTimes = Number.isFinite(Number(times))
+          ? Number(times)
+          : (hangUpAddTimes?.value ?? 2);
         if (addTimes > 0) {
           for (let i = 0; i < addTimes; i++) {
             if (shouldStop.value) break;
@@ -169,10 +195,13 @@ export function createTasksHangUp(deps) {
 
   /**
    * 一键加钟
+   * @param {number} times 弹框选择的次数，未传则用 hangUpAddTimes
    */
-  const batchAddHangUpTime = async () => {
+  const batchAddHangUpTime = async (times) => {
     if (selectedTokens.value.length === 0) return;
-    const addTimes = hangUpAddTimes?.value ?? 2;
+    const addTimes = Number.isFinite(Number(times))
+      ? Number(times)
+      : (hangUpAddTimes?.value ?? 2);
     if (addTimes <= 0) {
       message.info("加钟次数为0，不执行加钟");
       return;
@@ -252,9 +281,10 @@ export function createTasksHangUp(deps) {
 
     selectedTokens.value.forEach((id) => {
       tokenStatus.value[id] = "waiting";
+      // 清掉上一次运行残留的单账号答题状态，避免"已完成"状态跨账号/跨轮次残留
+      resetTokenStudyStatus(id);
     });
 
-    // Preload questions
     const { preloadQuestions } = await import("@/utils/studyQuestionsFromJSON.js");
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -337,14 +367,8 @@ export function createTasksHangUp(deps) {
           });
         }
 
-        // Reset local study status
-        tokenStore.gameData.studyStatus = {
-          isAnswering: false,
-          questionCount: 0,
-          answeredCount: 0,
-          status: "",
-          timestamp: null,
-        };
+        // Reset local study status（只重置当前账号，避免互相干扰）
+        resetTokenStudyStatus(tokenId);
 
         // Send start command
         await tokenStore.sendMessageWithPromise(
@@ -354,13 +378,19 @@ export function createTasksHangUp(deps) {
           5000,
         );
 
-        // Wait for completion
+        // Wait for completion（轮询当前账号自己的状态）
         let maxWait = 90;
         let completed = false;
         let lastStatus = "";
 
         while (maxWait > 0 && !shouldStop.value) {
-          const status = tokenStore.gameData.studyStatus;
+          const status = getTokenStudyStatus(tokenId);
+
+          if (!status) {
+            await workerSleep(1000);
+            maxWait--;
+            continue;
+          }
 
           if (status.status !== lastStatus) {
             lastStatus = status.status;
@@ -389,14 +419,46 @@ export function createTasksHangUp(deps) {
         }
 
         if (completed) {
-          // 答题+领奖流程全部走完，记录本周已完成（下次直接跳过）
-          markStudyCompletedThisWeek(tokenId);
-          tokenStatus.value[tokenId] = "completed";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} 答题完成 ===`,
-            type: "success",
-          });
+          // 二次确认：答题流程结束不代表答对数量达标（可能答案不全/答错），
+          // 必须向服务器核对当前账号本周是否真的答满 10 题，避免误记“已完成”。
+          let verified = false;
+          for (let attempt = 0; attempt < 2 && !verified; attempt++) {
+            try {
+              const checkRes = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "role_getroleinfo",
+                {},
+                5000,
+              );
+              const st = checkRes?.role?.study;
+              verified = !!(
+                st &&
+                st.maxCorrectNum >= 10 &&
+                st.beginTime * 1000 >= getWeekStartTime()
+              );
+            } catch {
+              /* 查询失败则继续重试一次 */
+            }
+            if (!verified) await workerSleep(1000);
+          }
+
+          if (verified) {
+            // 答题+领奖流程全部走完且服务器确认达标，记录本周已完成（下次直接跳过）
+            markStudyCompletedThisWeek(tokenId);
+            tokenStatus.value[tokenId] = "completed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `=== ${token.name} 答题完成 ===`,
+              type: "success",
+            });
+          } else {
+            tokenStatus.value[tokenId] = "failed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 答题流程结束，但服务器未确认答满10题，未标记完成`,
+              type: "error",
+            });
+          }
         } else {
           if (shouldStop.value) {
             addLog({
