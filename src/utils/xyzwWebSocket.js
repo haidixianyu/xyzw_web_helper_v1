@@ -411,6 +411,7 @@ export function registerDefaultCommands(reg) {
     .register("celebrate_sign") // 周年祝福(签到)，响应 celebrate_getcelebrateinforesp
     .register("celebrate_getcelebrateinfo") // 拉取周年信息，响应 celebrate_getcelebrateinforesp
     .register("celebrate_claimpersonal", { idList: [] }) // 领取个人奖励(可含签到/分享档位)
+    .register("celebrate_claimfullserver", { idList: [] }) // 领取全服签到奖励(逐档领取)
     .register("celebrate_share", { id: 0 }) // 分享领取，响应 celebrate_claimresp
     .register("activity_maydaylottery", { times: 1 }) // 周年抽奖(times: 10 十连 / 1 单抽)
     // 周年放入胶卷/兑换礼物 (activity_photo / activity_claimphotoreward)
@@ -1382,8 +1383,12 @@ export class XyzwWebSocketClient {
         "celebrate_sign",
         "celebrate_getcelebrateinfo",
       ],
-      // 个人领取与分享领取共用结果响应
-      celebrate_claimresp: ["celebrate_claimpersonal", "celebrate_share"],
+      // 个人领取、分享领取与全服领取共用结果响应
+      celebrate_claimresp: [
+        "celebrate_claimpersonal",
+        "celebrate_share",
+        "celebrate_claimfullserver",
+      ],
       activity_maydaylotteryresp: "activity_maydaylottery",
       // 放入胶卷响应
       activity_photoresp: "activity_photo",

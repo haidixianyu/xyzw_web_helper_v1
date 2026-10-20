@@ -22,6 +22,9 @@ const PHOTO_BATCH_SIZE = 10;
 // 十连抽次数
 const DRAW_BATCH_TIMES = 10;
 
+// 全服签到奖励最多连续探测档位数（服务端异常时不至于无限循环）
+const FULL_SERVER_MAX_PROBE = 50;
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const formatReward = (reward = []) =>
@@ -158,6 +161,71 @@ export function createTasksCelebrate(deps) {
       .map(([k]) => Number(k))
       .filter((n) => Number.isFinite(n) && n > 0);
 
+  /** 全服签到已领取档位（fullServerClaimMap 键为档位号，值为领取时间戳） */
+  const fullServerClaimedIds = (info) => {
+    const map = info?.fullServerClaimMap;
+    if (!map) return [];
+    const keys = Array.isArray(map)
+      ? map.map((e) => e?.key ?? e?.k ?? e)
+      : Object.keys(map);
+    return keys.map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  };
+
+  /**
+   * 领取全服签到奖励（celebrate_claimfullserver）
+   *
+   * 服务端只下发“已领取”的 fullServerClaimMap，不提供可领清单。
+   * 抓包日志中表现为：领完一档后下一档立即可领（8→9→10…14），
+   * 即后续档位会动态增加。因此从已领最大档位的下一档开始逐个尝试，
+   * 一旦服务端拒绝（未解锁/已领完）即停止，避免盲目枚举。
+   *
+   * @returns {Promise<number>} 本次成功领取的档位数
+   */
+  const claimFullServer = async (tokenId, info, tokenName) => {
+    const claimedIds = fullServerClaimedIds(info);
+    const startId = (claimedIds.length ? Math.max(...claimedIds) : 0) + 1;
+    let claimed = 0;
+    let nextId = startId;
+
+    for (let probe = 0; probe < FULL_SERVER_MAX_PROBE; probe++) {
+      if (shouldStop.value) break;
+      let res;
+      try {
+        res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "celebrate_claimfullserver",
+          { idList: [nextId] },
+          8000,
+        );
+      } catch (error) {
+        // 服务端拒绝即代表当前没有更多可领档位
+        log(
+          `${tokenName} 全服领取[${nextId}]结束: ${error.message || "不可领取"}`,
+          "info",
+        );
+        break;
+      }
+
+      if (!res?.reward?.length) break;
+
+      log(
+        `${tokenName} 周年全服领取[${nextId}]: ${formatReward(res.reward)}`,
+        "success",
+      );
+      claimed++;
+      nextId++;
+      await delay(commandDelay);
+    }
+
+    if (claimed > 0) {
+      log(
+        `${tokenName} 周年全服领取完成: ${claimed} 档 (${startId}-${nextId - 1})`,
+        "success",
+      );
+    }
+    return claimed;
+  };
+
   /** 领取个人奖励（签到档位） */
   const claimPersonal = async (tokenId, idList, tokenName) => {
     if (!idList.length) return 0;
@@ -235,7 +303,7 @@ export function createTasksCelebrate(deps) {
       }
     });
 
-  /** 周年领取：签到档位 -> 个人领取 -> 分享领取 */
+  /** 周年领取：个人领取 -> 全服领取（动态续领） -> 分享领取 */
   const batchCelebrateClaim = async () =>
     runBatch("周年领取", async (token, tokenId) => {
       const info = await fetchCelebrateInfo(tokenId);
@@ -247,11 +315,16 @@ export function createTasksCelebrate(deps) {
       const keys = claimableKeys(info.personalClaimMap || {});
       let claimed = 0;
       let shared = 0;
+      let fullServer = 0;
 
       if (keys.length) {
         claimed = await claimPersonal(tokenId, keys, token.name);
         await delay(commandDelay);
       }
+
+      // 全服签到奖励：领完一档会解锁下一档，循环领取直到服务端拒绝
+      fullServer = await claimFullServer(tokenId, info, token.name);
+      if (fullServer > 0) await delay(commandDelay);
 
       // 分享领取：对本次可领/已领的档位逐个尝试（已分享过的服务端会拒绝）
       for (const id of keys) {
@@ -261,8 +334,8 @@ export function createTasksCelebrate(deps) {
       }
 
       log(
-        `${token.name} 周年领取完成: 个人${claimed}, 分享${shared}, 档位[${keys.join(",") || "无"}]`,
-        claimed + shared > 0 ? "success" : "info",
+        `${token.name} 周年领取完成: 个人${claimed}, 全服${fullServer}, 分享${shared}, 档位[${keys.join(",") || "无"}]`,
+        claimed + shared + fullServer > 0 ? "success" : "info",
       );
     });
 
