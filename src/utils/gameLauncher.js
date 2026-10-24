@@ -135,10 +135,14 @@ function isFailure(value) {
   );
 }
 
-export function buildMultiGameFrameSrc(baseUrl, session) {
+export function buildMultiGameFrameSrc(baseUrl, session, gameVersion) {
   const scope = encodeURIComponent(session.scopeId);
   const tokenId = encodeURIComponent(session.tokenId);
-  return `${normalizeBaseUrl(baseUrl)}game/multi-game.html?scope=${scope}&bin_id=${tokenId}`;
+  const query = `scope=${scope}&bin_id=${tokenId}`;
+  if (gameVersion === "v2") {
+    return `${normalizeBaseUrl(baseUrl)}game2/multi.html?${query}`;
+  }
+  return `${normalizeBaseUrl(baseUrl)}game/multi-game.html?${query}`;
 }
 
 export function resolveMultiGameFrameMessage({
@@ -290,6 +294,7 @@ export async function prepareMultiGameLaunch({
       let buffer;
       try {
         buffer = await getArrayBuffer(token.id);
+        if (!buffer && token.name) buffer = await getArrayBuffer(token.name);
       } catch {
         return {
           failure: {

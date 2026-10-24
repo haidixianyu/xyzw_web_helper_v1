@@ -13,12 +13,21 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, onUnmounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 
-const gameSrc = import.meta.env.BASE_URL + 'game/index.html'
+// env=v2 时加载新版游戏壳(public/game2, 微信渠道), 否则原版本(public/game)
+// v2 单人模式显式携带 bin 参数(账号绑定), 避免复用上次启动遗留的账号
+const gameSrc = computed(() => {
+  const isV2 = route.query.env === 'v2'
+  const base =
+    import.meta.env.BASE_URL + (isV2 ? 'game2/index.html' : 'game/index.html')
+  if (!isV2 || !route.query.bin) return base
+  return base + '?bin=' + encodeURIComponent(String(route.query.bin))
+})
 
 function goBack() {
   router.push('/tokens')

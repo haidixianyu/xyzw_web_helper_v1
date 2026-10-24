@@ -162,7 +162,7 @@ import {
   reactive,
   ref,
 } from "vue";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import {
   buildMultiGameFrameSrc,
   closeMultiGameSession,
@@ -172,6 +172,7 @@ import {
 } from "@/utils/gameLauncher";
 
 const router = useRouter();
+const route = useRoute();
 const FRAME_LOAD_TIMEOUT_MS = 45_000;
 const launch = ref(readLaunchSafely());
 const gameStrip = ref(null);
@@ -190,7 +191,11 @@ const frames = computed(() => {
     .filter(Boolean)
     .map((session) => ({
       ...session,
-      src: buildMultiGameFrameSrc(import.meta.env.BASE_URL, session),
+      src: buildMultiGameFrameSrc(
+        import.meta.env.BASE_URL,
+        session,
+        route.query.env === "v2" ? "v2" : "v1",
+      ),
     }));
 });
 const frameElements = new Map();

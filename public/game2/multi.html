@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>风暴 V2 - 多账号</title>
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      name="viewport"
+      content="width=device-width,user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1,viewport-fit=cover,interactive-widget=resizes-content"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="renderer" content="webkit" />
+    <meta name="force-rendering" content="webkit" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    <meta name="full-screen" content="yes" />
+    <meta name="x5-fullscreen" content="true" />
+    <meta name="360-fullscreen" content="true" />
+    <meta name="screen-orientation" content="portrait" />
+    <meta name="x5-orientation" content="portrait" />
+    <meta name="x5-page-mode" content="app" />
+    <script>
+      window.__H5_BUILD_VERSION__ = "20260810140000";
+    </script>
+    <link rel="stylesheet" crossorigin href="./assets/shell.css?v=20260810140000" />
+  </head>
+  <body>
+    <canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+    <div id="splash">
+      <div class="progress-bar stripes">
+        <span style="width: 0%"></span>
+      </div>
+    </div>
+
+    <!-- 账号隔离: 校验 scope/bin_id 并安装作用域化 localStorage(与 v1 multi-game.html 同一桥) -->
+    <script src="./multi-game-storage-bridge.js" charset="utf-8"></script>
+    <!-- v1 上号器登录注入: 强制 bin 的 serverId, 防止串号 (必须先于 bridge-shim) -->
+    <script src="./login-injector.js?v=3" charset="utf-8"></script>
+    <!-- GameBridge 适配层: 复用 v1 的 bin 凭据驱动登录/切服 -->
+    <script src="./bridge-shim.js?v=9" charset="utf-8"></script>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var CACHE_TAG = "20260810140000";
+        var bridge = window.__MULTI_GAME_BRIDGE_READY__;
+
+        var notify = function (type, code) {
+          if (!bridge || !(window.parent && window.parent !== window)) return;
+          try {
+            window.parent.postMessage(
+              {
+                channel: "multi-game",
+                version: 1,
+                type: type,
+                scope: bridge.scope,
+                ...(code ? { code } : {}),
+              },
+              window.location.origin,
+            );
+          } catch (e) {}
+        };
+
+        var renderFatal = function (text) {
+          var splash = document.getElementById("splash");
+          if (splash) {
+            splash.style.display = "block";
+            splash.textContent = text;
+          }
+        };
+
+        if (!bridge) {
+          var reason =
+            (window.__MULTI_GAME_BRIDGE_ERROR__ &&
+              window.__MULTI_GAME_BRIDGE_ERROR__.code) ||
+            "bridge-install-failed";
+          renderFatal("游戏账号隔离初始化失败 (" + reason + ")");
+          notify("fatal", "bridge-install-failed");
+          return;
+        }
+
+        var scripts = [
+          "./viewport-sync.js",
+          "./assets/lz4.js",
+          "./assets/lx-cipher.js",
+          "./assets/packet-codec.js",
+          // WS 日志抓取: 必须在游戏 bundle 定义 __require 之前安装拦截(与 v1 一致)
+          "../game/ws-capture.js",
+          "./boot-loader.js",
+        ];
+
+        var loadScript = function (src) {
+          return new Promise(function (resolve, reject) {
+            var script = document.createElement("script");
+            script.src = src + "?v=" + CACHE_TAG;
+            script.charset = "utf-8";
+            script.onload = resolve;
+            script.onerror = function () {
+              reject(new Error("Unable to load " + src));
+            };
+            document.head.appendChild(script);
+          });
+        };
+
+        (async function () {
+          for (var i = 0; i < scripts.length; i++) await loadScript(scripts[i]);
+          // boot-loader 会异步拉起 server-switch/runtime-patch/loader, 这里先隐藏 splash;
+          // 引擎与场景就绪由 GameBridge.reportBootStage 汇报, 失败经 showAuthorizationError 转 fatal
+          var splash = document.getElementById("splash");
+          if (splash) splash.style.display = "none";
+          notify("ready");
+        })().catch(function (err) {
+          console.error("[multi-v2] 运行时加载失败", err);
+          renderFatal(
+            "游戏资源加载失败: " +
+              ((err && (err.message || err)) || "未知错误"),
+          );
+          notify("fatal", "runtime-load-failed");
+        });
+      })();
+    </script>
+  </body>
+</html>

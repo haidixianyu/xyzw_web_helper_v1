@@ -2215,8 +2215,32 @@ function convertBinToLx(buf) {
   return e;
 }
 
+// 游戏版本选择弹窗: v1=原版本(public/game, 抖音H5渠道) / v2=新游戏壳(public/game2, 微信渠道)
+function showGameVersionDialog(title, onPick) {
+  dialog.warning({
+    title,
+    content: () =>
+      h("div", { style: "line-height:2" }, [
+        h("p", { style: "margin:0" }, "V1：原版本（抖音 H5 渠道）"),
+        h(
+          "p",
+          { style: "margin:0" },
+          "V2：新游戏壳（微信渠道，盐场/蟠桃无版本异常）",
+        ),
+      ]),
+    positiveText: "V2 · 新游戏壳",
+    negativeText: "V1 · 原版本",
+    onPositiveClick: () => onPick("v2"),
+    onNegativeClick: () => onPick("v1"),
+  });
+}
+
 async function openSelectedGames() {
   if (selectedMultiGameTokens.value.length === 0 || isOpeningMultiGame.value) return;
+  showGameVersionDialog("批量游戏 - 选择版本", (env) => launchSelectedGames(env));
+}
+
+async function launchSelectedGames(env) {
   const tokensToOpen = [...selectedMultiGameTokens.value];
   isOpeningMultiGame.value = true;
   try {
@@ -2235,7 +2259,9 @@ async function openSelectedGames() {
       const failedNames = failures.map((failure) => failure.name).join("、");
       message.warning(`已跳过 ${failures.length} 个账号：${failedNames}`);
     }
-    await router.push("/multi-game");
+    await router.push(
+      env === "v2" ? { path: "/multi-game", query: { env: "v2" } } : "/multi-game",
+    );
   } catch (error) {
     console.error("Batch game launch failed:", error);
     message.error("批量进入游戏失败，请重试");
@@ -2244,14 +2270,23 @@ async function openSelectedGames() {
   }
 }
 
-const openGame = async () => {
+const openGame = () => {
+  if (!tokenStore.selectedToken) {
+    message.warning("请先选择一个Token");
+    return;
+  }
+  showGameVersionDialog("单个游戏 - 选择版本", (env) => prepareSingleGameLaunch(env));
+};
+
+const prepareSingleGameLaunch = async (env) => {
   const token = tokenStore.selectedToken;
   if (!token) {
     message.warning("请先选择一个Token");
     return;
   }
-  // 从 IndexedDB 获取 BIN 数据，同步到 localStorage
-  const binData = await getArrayBuffer(token.id);
+  // 从 IndexedDB 获取 BIN 数据(优先 id key, 兜底名字 key, 与其他登录路径一致)，同步到 localStorage
+  let binData = await getArrayBuffer(token.id);
+  if (!binData && token.name) binData = await getArrayBuffer(token.name);
   if (!binData) {
     message.error("未找到该Token的BIN数据");
     return;
@@ -2277,7 +2312,11 @@ const openGame = async () => {
     });
     localStorage.setItem("bin_file_list", JSON.stringify(binList));
   }
-  router.push("/game");
+  router.push(
+    env === "v2"
+      ? { path: "/game", query: { env: "v2", bin: token.id } }
+      : "/game",
+  );
 };
 
 // 开始任务管理 - 直接跳转到控制台

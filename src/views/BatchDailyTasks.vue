@@ -714,34 +714,6 @@
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchCelebrateSign"
-                  >
-                    周年祝福
-                  </n-button>
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchCelebrateClaim"
-                  >
-                    周年领取
-                  </n-button>
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchCelebrateSingleLottery"
-                  >
-                    单抽
-                  </n-button>
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                    @click="batchCelebrateTenLottery"
-                  >
-                    十连抽
-                  </n-button>
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
                     @click="batchCelebrateWarOrderClaim"
                   >
                     入镜任务
@@ -824,20 +796,9 @@
             </n-tab-pane>
             <n-tab-pane name="weirdTower" tab="怪异塔">
               <n-space>
-                <n-input-number
-                  v-model:value="weirdTowerMaxClimb"
-                  class="weird-tower-count-input"
-                  size="small"
-                  :min="1"
-                  :precision="0"
-                  :show-button="false"
-                  placeholder="次数"
-                  :disabled="isRunning"
-                />
-                <span class="weird-tower-count-unit">次</span>
                 <n-button
                   size="small"
-                  @click="climbWeirdTower"
+                  @click="showWeirdTowerClimbModal = true"
                   :disabled="
                     isRunning ||
                     selectedTokens.length === 0 ||
@@ -1367,6 +1328,39 @@
                     单次抽奖
                   </n-button>
                 </n-space>
+
+                <!-- 周年 -->
+                <n-space size="small" align="center" wrap>
+                  <span class="batch-group-label">周年</span>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebrateSign"
+                  >
+                    周年祝福
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebrateClaim"
+                  >
+                    周年领取
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebrateSingleLottery"
+                  >
+                    单抽
+                  </n-button>
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                    @click="batchCelebrateTenLottery"
+                  >
+                    十连抽
+                  </n-button>
+                </n-space>
               </n-space>
             </n-tab-pane>
           </n-tabs>
@@ -1608,6 +1602,28 @@
       </div>
       <div class="hangup-times-hint">
         {{ hangUpModalMode === 'claim' ? '0 = 仅领取挂机奖励，不加钟' : '0 = 不加钟（不执行）' }}
+      </div>
+    </n-modal>
+
+    <!-- 一键爬怪异塔：选择爬塔次数，点选后直接执行 -->
+    <n-modal
+      v-model:show="showWeirdTowerClimbModal"
+      preset="card"
+      title="一键爬怪异塔 - 选择次数"
+      style="width: 90%; max-width: 360px"
+      :auto-focus="false"
+    >
+      <div class="weird-tower-climb-options">
+        <n-button
+          v-for="cnt in WEIRD_TOWER_CLIMB_OPTIONS"
+          :key="cnt"
+          type="primary"
+          secondary
+          size="large"
+          @click="startWeirdTowerClimb(cnt)"
+        >
+          {{ cnt }}
+        </n-button>
       </div>
     </n-modal>
 
@@ -4225,6 +4241,14 @@ import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 const tokenStore = useTokenStore();
 const message = useMessage();
 const weirdTowerMaxClimb = ref(DEFAULT_WEIRD_TOWER_MAX_CLIMB);
+// 一键爬怪异塔：不再手动输入次数，点击按钮后弹框选择次数，点选后立即执行
+const showWeirdTowerClimbModal = ref(false);
+const WEIRD_TOWER_CLIMB_OPTIONS = [1, 3, 10, 99];
+const startWeirdTowerClimb = (cnt) => {
+  showWeirdTowerClimbModal.value = false;
+  weirdTowerMaxClimb.value = cnt;
+  climbWeirdTower();
+};
 
 // 排序配置（从localStorage读取，与TokenImport共享）
 const savedSortConfig = localStorage.getItem("tokenSortConfig");
@@ -10744,9 +10768,13 @@ const stopBatch = () => {
   color: #666;
 }
 
-.weird-tower-count-input {
-  width: 86px;
-  flex-shrink: 0;
+.weird-tower-climb-options {
+  display: flex;
+  gap: 10px;
+}
+
+.weird-tower-climb-options .n-button {
+  flex: 1;
 }
 
 /* 每日分组排版 */
@@ -11086,14 +11114,6 @@ const stopBatch = () => {
     padding: 2px 4px;
     font-size: 11px;
   }
-}
-
-.weird-tower-count-unit {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  color: #666;
-  font-size: 14px;
 }
 
 /* 任务模板管理: 模板卡片行布局 */

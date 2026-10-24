@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
+
+    <title>风暴 V2</title>
+
+    <meta
+      name="viewport"
+      content="width=device-width,user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1,viewport-fit=cover,interactive-widget=resizes-content"
+    />
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="renderer" content="webkit" />
+    <meta name="force-rendering" content="webkit" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    <meta name="full-screen" content="yes" />
+    <meta name="x5-fullscreen" content="true" />
+    <meta name="360-fullscreen" content="true" />
+    <meta name="screen-orientation" content="portrait" />
+    <meta name="x5-orientation" content="portrait" />
+    <meta name="x5-page-mode" content="app" />
+    <link rel="icon" href="./assets/favicon.ico?v=20260810140000" />
+    <link rel="preconnect" href="https://xxz-xyzw.hortorgames.com" crossorigin />
+    <link rel="preconnect" href="https://xxz-xyzw-res.hortorgames.com" crossorigin />
+    <script>
+      window.__H5_BUILD_VERSION__ = '20260810140000';
+    </script>
+    <link rel="preload" href="./assets/main.js?v=20260810140000" as="script" />
+    <link rel="preload" href="./assets/cocos2d-js-min.js?v=20260810140000" as="script" />
+
+    <!-- v1 上号器登录注入: 解析 bin 强制 serverId, 防止游戏自动选"最近在玩"角色导致串号 (必须先于 bridge-shim) -->
+    <script src="./login-injector.js?v=3"></script>
+    <!-- GameBridge 适配层: 复用 v1 的 bin 凭据(localStorage)驱动登录/切服, 必须先于 boot-loader -->
+    <script src="./bridge-shim.js?v=9"></script>
+    <!-- 上号器: 游戏内直接切换账号(读 bin_file_list / current_bin_id, 切换后整页 reload 重走登录) -->
+    <script src="./account-switcher.js?v=4"></script>
+    <!-- Browser bridge: loads the short-lived role session before game scripts start. -->
+    <script src="./viewport-sync.js?v=20260810140000"></script>
+    <!-- session-gate.js 已跳过: 其会话门禁依赖原宿主后端且会覆盖 bridge-shim 的 GameBridge -->
+
+    <!-- LZ4 & XXL Crypto & BON Decoder -->
+    <script src="./assets/lz4.js?v=20260810140000"></script>
+    <script src="./assets/lx-cipher.js?v=20260810140000"></script>
+    <script src="./assets/packet-codec.js?v=20260810140000"></script>
+    
+    <script>
+      window.__WECHAT_REFERER__ = "https://servicewechat.com/wx0840558555a454ed/326/page-frame.html";
+      window.__WECHAT_UA__ = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254186b) XWEB/19481";
+    </script>
+    <!-- WS 日志抓取: 必须在游戏 bundle 定义 __require 之前安装拦截(与 v1 加载顺序一致),
+         脚本内部按账号开关 ws_log_enabled:{账号id} 自判, 关闭时不做任何挂钩 -->
+    <script src="../game/ws-capture.js?v=1017b" charset="utf-8"></script>
+    <script src="./boot-loader.js?v=20260810140000"></script>
+    <link rel="stylesheet" crossorigin href="./assets/shell.css?v=20260810140000">
+  </head>
+  <body>
+    <canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+    <div id="splash">
+      <div class="progress-bar stripes">
+        <span style="width: 0%"></span>
+      </div>
+    </div>
+</body>
+</html>
